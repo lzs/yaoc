@@ -22,7 +22,10 @@ let slots = [],
   timerId = 0,
   listener,
   statusListener;
+const key = (name, agent = 'main') => modelModule.exports.toGatewaySessionKey(agent, name);
 const requests = [];
+const keydownListeners = new Set();
+let shortcutCleanup;
 let sendReply = () => Promise.resolve({ runId: 'run-a' });
 const api = {
   onStatus(callback) {
@@ -71,7 +74,7 @@ const source = fs
 const renderStart = source.indexOf('\n  return (', source.indexOf('export default function App()'));
 const testSource =
   source.slice(0, renderStart) +
-  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys }; }`;
+  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId }; }`;
 const exportsObject = {};
 vm.runInNewContext(compile(testSource), {
   exports: exportsObject,
@@ -81,7 +84,15 @@ vm.runInNewContext(compile(testSource), {
     if (name === './theme') return { loadTheme: () => 'dark' };
     return {};
   },
-  window: { openclawApi: api, addEventListener() {}, removeEventListener() {} },
+  window: {
+    openclawApi: api,
+    addEventListener(name, callback) {
+      if (name === 'keydown') keydownListeners.add(callback);
+    },
+    removeEventListener(name, callback) {
+      if (name === 'keydown') keydownListeners.delete(callback);
+    },
+  },
   document: { hasFocus: () => true },
   localStorage: { getItem: () => null, setItem() {} },
   setTimeout(callback) {
@@ -99,8 +110,12 @@ let view;
 function render() {
   cursor = 0;
   effects = [];
+  shortcutCleanup?.();
   view = exportsObject.default();
   effects.find((effect) => effect.toString().includes('const nextUiState ='))();
+  shortcutCleanup = effects.find((effect) =>
+    effect.toString().includes('setShowQuitConfirmModal')
+  )();
   return view;
 }
 function event(sessionKey, state, extra = {}) {
@@ -185,6 +200,165 @@ function event(sessionKey, state, extra = {}) {
   render();
   assert.equal(view.isStreaming, false, 'Unexpected connection loss clears all sessions');
   assert.equal(view.streamingSessionKeys.size, 0);
+  // Short names and Gateway-qualified events must identify one live conversation.
+  view.setConnStatus({ state: 'connected' });
+  sendReply = () => Promise.resolve({ runId: 'run-new' });
+  render();
+  view.setNewSessionKeyInput('test-2');
+  render();
+  view.handleCreateSession();
+  render();
+  assert.equal(view.selectedSessionKey, 'agent:main:test-2');
+  assert.equal(view.sessions.filter((session) => session.key === 'agent:main:test-2').length, 1);
+  assert.equal(
+    view.sessions.find((session) => session.key === 'agent:main:test-2').label,
+    'test-2'
+  );
+  view.setComposerText('Hello');
+  render();
+  await view.handleSendMessage();
+  render();
+  assert.equal(
+    requests.findLast((request) => request.method === 'chat.send').params.sessionKey,
+    'agent:main:test-2'
+  );
+  event('agent:main:test-2', 'delta', { delta: 'Immediate reply' });
+  assert(
+    view.messages.some(
+      (message) => message.role === 'assistant' && message.content === 'Immediate reply'
+    ),
+    'Canonical event appears immediately without refreshing history or waiting for a timeout'
+  );
+  assert.equal(view.sessions.filter((session) => session.key === 'agent:main:test-2').length, 1);
+  assert.equal(
+    view.sessions.some((session) => session.key === 'test-2'),
+    false,
+    'No phantom short-name row'
+  );
+  event('agent:main:test-2', 'final', { message: { content: 'Immediate reply' } });
+  assert.equal(view.isStreaming, false, 'Qualified terminal event clears the same spinner');
+  assert.equal(view.streamingSessionKeys.has('agent:main:test-2'), false);
+  view.setComposerText('Keep this draft');
+  view.setPendingAttachments([{ id: 'canonical-attachment' }]);
+  render();
+  view.handleSelectSession('test-2');
+  render();
+  assert.equal(
+    view.composerText,
+    'Keep this draft',
+    'Selecting a short alias keeps its canonical draft'
+  );
+  assert.equal(view.pendingAttachments[0].id, 'canonical-attachment');
+  view.setNewSessionKeyInput('agent:main:test-2');
+  render();
+  view.handleCreateSession();
+  render();
+  assert.equal(
+    view.sessions.filter((session) => session.key === 'agent:main:test-2').length,
+    1,
+    'Creating an existing alias selects it'
+  );
+  listener({
+    event: 'chat',
+    payload: { sessionKey: 'agent:research:test-2', state: 'delta', delta: 'Other agent' },
+  });
+  render();
+  assert.equal(
+    view.sessions.some((session) => session.key === 'agent:research:test-2'),
+    false,
+    'Qualified keys identify their own agent even when agentId is omitted'
+  );
+  assert.equal(
+    view.messages.some((message) => message.content.includes('Other agent')),
+    false
+  );
+  view.setSelectedAgentId('research');
+  render();
+  view.setNewSessionKeyInput('test-2');
+  render();
+  view.handleCreateSession();
+  render();
+  event('agent:research:test-2', 'delta', { delta: 'Research reply' });
+  assert(view.messages.some((message) => message.content === 'Research reply'));
+  assert.equal(view.selectedSessionKey, 'agent:research:test-2');
+  event('agent:research:test-2', 'final');
+  assert.equal(view.isStreaming, false);
+  view.setSelectedAgentId('main');
+  view.setConnStatus({ state: 'disconnected' });
+  render();
+  console.log(
+    'PASS: canonical new sessions, immediate streaming, one sidebar row, draft aliases, terminal cleanup, and cross-agent isolation'
+  );
+
+  // Exercise the real window keyboard handler and existing session-selection path.
+  function press(key, overrides = {}) {
+    let prevented = false;
+    const event = {
+      key,
+      ctrlKey: true,
+      altKey: false,
+      shiftKey: false,
+      metaKey: false,
+      defaultPrevented: false,
+      isComposing: false,
+      preventDefault() {
+        prevented = true;
+      },
+      ...overrides,
+    };
+    for (const listener of [...keydownListeners]) listener(event);
+    render();
+    return prevented;
+  }
+  view.setSessions(
+    modelModule.exports.normalizeSessions([{ key: 'main' }, { key: 'b' }, { key: 'c' }], 'main')
+  );
+  view.handleSelectSession('main');
+  render();
+  view.setComposerText('keyboard draft A');
+  render();
+  assert.equal(press('PageDown'), true);
+  assert.equal(view.selectedSessionKey, key('b'));
+  view.setComposerText('keyboard draft B');
+  render();
+  press('PageUp');
+  assert.equal(view.selectedSessionKey, key('main'));
+  assert.equal(view.composerText, 'keyboard draft A');
+  press('PageUp');
+  assert.equal(view.selectedSessionKey, key('c'), 'Previous wraps from first to last');
+  press('PageDown');
+  assert.equal(view.selectedSessionKey, key('main'), 'Next wraps from last to first');
+  for (const overrides of [
+    { ctrlKey: false },
+    { altKey: true },
+    { shiftKey: true },
+    { metaKey: true },
+    { isComposing: true },
+    { defaultPrevented: true },
+  ]) {
+    assert.equal(press('PageDown', overrides), false);
+    assert.equal(view.selectedSessionKey, key('main'));
+  }
+  for (const setter of ['setShowProfileModal', 'setShowQuitConfirmModal', 'setIsRecordingHotkey']) {
+    view[setter](true);
+    render();
+    assert.equal(press('PageDown'), false);
+    assert.equal(view.selectedSessionKey, key('main'), setter + ' suppresses navigation');
+    view[setter](false);
+    render();
+  }
+  press('PageDown');
+  assert.equal(view.composerText, 'keyboard draft B');
+  view.setSessions(modelModule.exports.normalizeSessions([{ key: 'b' }], 'main'));
+  render();
+  press('PageDown');
+  assert.equal(view.selectedSessionKey, key('b'), 'Single-session navigation stays put');
+  view.setSessions([]);
+  render();
+  assert.equal(press('PageUp'), false);
+  console.log(
+    'PASS: Ctrl+Page Up/Down order, wraparound, drafts, modifiers, modal guards, and empty/single session lists'
+  );
   console.log(
     'PASS: session isolation, drafts/attachments, background completion, abort IDs, lifecycle, timeout, delayed failure routing and connection loss'
   );

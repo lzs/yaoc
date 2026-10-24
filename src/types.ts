@@ -18,7 +18,17 @@ export interface AgentInfo {
   workspace?: string;
 }
 
-export interface SessionInfo {
+export interface ThinkingOption {
+  id: string;
+  label: string;
+}
+
+export interface ThinkingMetadata {
+  thinkingLevels?: ThinkingOption[];
+  thinkingDefault?: string;
+}
+
+export interface SessionInfo extends ThinkingMetadata {
   key: string;
   agentId: string;
   sessionId?: string;

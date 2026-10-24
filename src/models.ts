@@ -1,4 +1,6 @@
-export interface ModelOption {
+import type { SessionInfo, ThinkingMetadata, ThinkingOption } from './types';
+
+export interface ModelOption extends ThinkingMetadata {
   ref: string;
   label: string;
   available: boolean;
@@ -14,9 +16,38 @@ export function modelRef(model?: string, provider?: string): string {
 export function toGatewaySessionKey(agentId: string, sessionKey: string): string {
   const cleanAgent = agentId?.trim() || 'main';
   const cleanKey = sessionKey?.trim() || 'main';
-  return cleanKey.startsWith('agent:') || cleanAgent === 'main'
+  // The main agent uses qualified store/event keys too. Keep unscoped sentinels intact.
+  return cleanKey.startsWith('agent:') || cleanKey === 'global' || cleanKey === 'unknown'
     ? cleanKey
     : `agent:${cleanAgent}:${cleanKey}`;
+}
+
+export function sessionAgentId(key: string, fallback = 'main'): string {
+  return /^agent:([^:]+):/.exec(key)?.[1] || fallback;
+}
+
+// Collapse short and qualified aliases, preferring Gateway metadata and human labels.
+export function normalizeSessions(rows: SessionInfo[], fallbackAgent: string): SessionInfo[] {
+  const sessions = new Map<string, { row: SessionInfo; qualified: boolean }>();
+  const meaningfulLabel = (row: SessionInfo) =>
+    typeof row.label === 'string' &&
+    row.label.trim() &&
+    row.label !== row.key &&
+    row.label !== toGatewaySessionKey(row.agentId, row.key);
+  for (const row of rows) {
+    if (!row || typeof row.key !== 'string' || !row.key.trim()) continue;
+    const agentId = sessionAgentId(row.key, row.agentId || fallbackAgent);
+    const key = toGatewaySessionKey(agentId, row.key);
+    const qualified = row.key === key;
+    const previous = sessions.get(key);
+    const preferred = previous?.qualified && !qualified ? previous.row : row;
+    const other = preferred === row ? previous?.row : row;
+    const merged = { ...other, ...preferred, key, agentId };
+    if (!meaningfulLabel(preferred) && other && meaningfulLabel(other)) merged.label = other.label;
+    if (merged.label === key) merged.label = key.replace(/^agent:[^:]+:/, '');
+    sessions.set(key, { row: merged, qualified: qualified || !!previous?.qualified });
+  }
+  return [...sessions.values()].map((entry) => entry.row);
 }
 
 export function normalizeModels(result: any): ModelOption[] {
@@ -32,6 +63,7 @@ export function normalizeModels(result: any): ModelOption[] {
       ref,
       label: provider ? `${name} · ${provider}` : name,
       available: entry.available !== false && entry.selectable !== false,
+      ...normalizeThinkingMetadata(entry),
     });
   }
   return [...choices.values()].sort((a, b) => a.label.localeCompare(b.label));
@@ -44,7 +76,11 @@ export async function loadSessionModels(
 ): Promise<ModelOption[]> {
   let result: any;
   try {
-    result = await request('models.list', { agentId, sessionKey, view: 'configured' });
+    result = await request('models.list', {
+      agentId,
+      sessionKey: toGatewaySessionKey(agentId, sessionKey),
+      view: 'configured',
+    });
   } catch (error: any) {
     // Older Gateways only accept an empty models.list parameter object.
     if (
@@ -63,7 +99,7 @@ export async function changeSessionModel(
   key: string,
   selection: string,
   agentId = 'main'
-): Promise<{ model: string; modelProvider: string }> {
+): Promise<ThinkingMetadata & { model: string; modelProvider: string; thinkingLevel?: string }> {
   // Explicit keys keep short session names scoped to the selected non-default agent,
   // including on older Gateways whose sessions.patch schema has no agentId field.
   const targetKey = toGatewaySessionKey(agentId, key);
@@ -86,5 +122,93 @@ export async function changeSessionModel(
   return {
     model: typeof model === 'string' ? model : '',
     modelProvider: typeof provider === 'string' ? provider : '',
+    // Explicit undefined clears capability data belonging to the previous model.
+    thinkingLevels: undefined,
+    thinkingDefault: undefined,
+    ...normalizeThinkingMetadata(entry),
+    ...normalizeThinkingMetadata(resolved),
+    ...(Object.prototype.hasOwnProperty.call(entry || {}, 'thinkingLevel')
+      ? { thinkingLevel: typeof entry.thinkingLevel === 'string' ? entry.thinkingLevel : '' }
+      : {}),
+  };
+}
+
+// Preserve the Gateway's option order and IDs: labels are presentation, IDs are wire values.
+export function normalizeThinkingMetadata(source: any): ThinkingMetadata {
+  const raw = Array.isArray(source?.thinkingLevels)
+    ? source.thinkingLevels
+    : Array.isArray(source?.thinkingOptions)
+      ? source.thinkingOptions
+      : undefined;
+  const result: ThinkingMetadata = {};
+  if (!raw && source?.reasoning === false) {
+    result.thinkingLevels = [{ id: 'off', label: 'None' }];
+  }
+  if (raw) {
+    const options = new Map<string, ThinkingOption>();
+    for (const entry of raw) {
+      const id =
+        typeof entry === 'string'
+          ? entry.trim()
+          : typeof entry?.id === 'string'
+            ? entry.id.trim()
+            : '';
+      if (!id) continue;
+      const label =
+        typeof entry?.label === 'string' && entry.label.trim()
+          ? entry.label.trim()
+          : thinkingLevelLabel(id);
+      if (!options.has(id)) options.set(id, { id, label });
+    }
+    // An explicit empty list means no advertised choices, not an older Gateway.
+    result.thinkingLevels = [...options.values()];
+  }
+  if (typeof source?.thinkingDefault === 'string') result.thinkingDefault = source.thinkingDefault;
+  return result;
+}
+
+export function thinkingLevelLabel(level: string): string {
+  if (level === 'off' || level === 'none') return 'None';
+  if (!level) return 'Default';
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+export function sessionThinkingMetadata(session: any, defaults: any): ThinkingMetadata {
+  const own = normalizeThinkingMetadata(session);
+  const sameModel =
+    !session?.model ||
+    modelRef(session.model, session.modelProvider) ===
+      modelRef(defaults?.model, defaults?.modelProvider);
+  return { ...(sameModel ? normalizeThinkingMetadata(defaults) : {}), ...own };
+}
+
+export function reasoningOptions(metadata: ThinkingMetadata, current = ''): ThinkingOption[] {
+  if (metadata.thinkingLevels !== undefined) return metadata.thinkingLevels;
+  const legacy = ['off', 'minimal', 'low', 'medium', 'high'];
+  if (current && !legacy.includes(current)) legacy.push(current);
+  return legacy.map((id) => ({ id, label: thinkingLevelLabel(id) }));
+}
+
+export async function loadSessionThinking(
+  request: GatewayRequest,
+  agentId: string,
+  key: string
+): Promise<ThinkingMetadata & { thinkingLevel?: string }> {
+  const listing = await request('sessions.list', { agentId, limit: 100 });
+  const target = toGatewaySessionKey(agentId, key);
+  const row = Array.isArray(listing?.sessions)
+    ? listing.sessions.find(
+        (entry: any) =>
+          typeof entry?.key === 'string' &&
+          toGatewaySessionKey(sessionAgentId(entry.key, entry.agentId || agentId), entry.key) ===
+            target
+      )
+    : undefined;
+  if (!row) return {};
+  return {
+    ...sessionThinkingMetadata(row, listing.defaults),
+    ...(Object.prototype.hasOwnProperty.call(row, 'thinkingLevel')
+      ? { thinkingLevel: typeof row.thinkingLevel === 'string' ? row.thinkingLevel : '' }
+      : {}),
   };
 }

@@ -180,7 +180,20 @@ yaoc/
 - **Close-to-Tray (`on_window_event`):** When the tray initialized successfully, intercepts `WindowEvent::CloseRequested` on the main window, calls `api.prevent_close()`, and hides the window (`window.hide()`) so the WebSocket connection and streaming listeners continue running in the Windows system tray.
 - **System Tray Icon & Context Menu (`setup_system_tray`):** Uses `tauri::tray::TrayIconBuilder` (`features = ["tray-icon"]`) with a left-click window toggle and a right-click menu containing **Show / Hide YAOC (<shortcut>)** and **Quit YAOC** (which calls `app.exit(0)` immediately).
 - **Customizable Global Hotkey (`spawn_global_hotkey_listener` & `set_global_hotkey`):** Spawns a background thread calling Win32 `RegisterHotKey` and `GetMessageW` (`WM_HOTKEY`). Defaults to `Alt+Shift+3`, persisted in `uiState.globalHotkey` (`gateway-profiles.json`), and can be recorded, reset, or disabled live from **Settings $\rightarrow$ General**.
+- **`Ctrl+Page Up/Down` Session Navigation:** Switches to the previous/next session in sidebar order, wrapping at either end. Reuses the existing session-selection path to preserve drafts and scroll state, scrolls the selected row into view, and focuses the composer. Navigation is suppressed during shortcut recording, composition, and modal dialogs.
 - **`Ctrl+,` & `Ctrl+Q` In-Window Shortcuts:** Pressing `Ctrl+,` inside the window opens the Settings modal, and pressing `Ctrl+Q` opens a quit confirmation modal (press `Ctrl+Q` again to confirm quit via `quit_app`, or `Esc` to cancel).
+
+### 3.5 Background efficiency mode
+
+On Windows, the native host opts into EcoQoS and idle CPU priority while the main window is unfocused, minimized, or hidden in the tray. A visible, non-minimized window regaining focus restores the priority and execution-speed policy captured before entering background mode. The efficiency policy also applies to a visible window while another application has focus.
+
+`src-tauri/src/efficiency.rs` wraps `GetProcessInformation`, `SetProcessInformation(ProcessPowerThrottling)`, and the process-priority APIs. A mutex serializes transitions; repeated background/foreground requests are idempotent. Failed changes are reported in diagnostics, with rollback or a retained restoration snapshot. Unsupported power policies are non-fatal. Unrelated power-throttling bits are preserved when restoring.
+
+Window resize/focus events and the tray, close-to-tray, and global-shortcut paths recheck actual visibility, minimized state, and focus on the main thread. A native `EVENT_SYSTEM_FOREGROUND` listener shares the existing hotkey thread/message loop, covering focus changes before WebView2 starts delivering focus events without polling. Foreground ownership is checked through `GetForegroundWindow`/`GetAncestor`; YAOC-owned dialogs count as active. The native Gateway connection, WebView2 renderer, streaming handlers, and approvals stay running; the feature does not suspend the renderer, modify child-process priorities, or change transport timers. Task Manager controls how it displays Efficiency mode, and its indicator is not a measurement of energy savings.
+
+A Windows regression test uses a separate child process to verify the real EcoQoS and priority flags, repeated transitions, and restoration without changing the scheduling of other tests. Both Windows architectures are built; native ARM64 behavior still requires validation on ARM hardware.
+
+See [Windows efficiency mode](https://devblogs.microsoft.com/performance-diagnostics/reduce-process-interference-with-task-manager-efficiency-mode/) and [SetProcessInformation](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation).
 
 ---
 
@@ -191,9 +204,9 @@ yaoc/
 #### Agents, Models & Sessions
 
 - `agents.list` `{}` $\rightarrow$ Lists available agents (`id`, `name`, `workspace`).
-- `models.list` `{ agentId, sessionKey, view: "configured" }` (falls back to `{}` on older Gateways) $\rightarrow$ Lists available models (`id`, `provider`, `name`, `available`, `selectable`) for [`SessionModelSwitcher.tsx`](../src/SessionModelSwitcher.tsx).
+- `models.list` `{ agentId, sessionKey, view: "configured" }` (falls back to `{}` on older Gateways) $\rightarrow$ Lists available models (`id`, `provider`, `name`, `available`, `selectable`, and optional `thinkingLevels`/`thinkingDefault`) for [`SessionModelSwitcher.tsx`](../src/SessionModelSwitcher.tsx).
 - `sessions.list` `{ agentId, limit: 100, includeDerivedTitles: true }` (falls back to `{ agentId, limit: 100 }`) $\rightarrow$ Lists sessions for the active agent (`key`, `sessionId`, `label`, `displayName`, `derivedTitle`, `model`, `modelProvider`, `thinkingLevel`, `inputTokens`, `outputTokens`, `totalTokens`, `contextTokens`, `updatedAt`).
-- `sessions.patch` `{ key, label?, model?, thinkingLevel? }` $\rightarrow$ Updates a session's display label, model override (`provider/model` or `null` for agent default), or reasoning effort (`"off" | "minimal" | "low" | "medium" | "high" | null`). Short session keys for non-`main` agents are normalized via `toGatewaySessionKey(agentId, sessionKey)` (`agent:${agentId}:${sessionKey}`).
+- `sessions.patch` `{ key, label?, model?, thinkingLevel? }` $\rightarrow$ Updates a session's display label, model override (`provider/model` or `null` for agent default), or reasoning effort (an advertised option ID, or `null` to inherit the Gateway default). Short session keys for all agents, including `main`, are normalized via `toGatewaySessionKey(agentId, sessionKey)` (`agent:${agentId}:${sessionKey}`).
 - `sessions.reset` `{ key }` $\rightarrow$ Resets a session transcript (equivalent to `/reset`).
 - `sessions.delete` `{ key, deleteTranscript: true }` $\rightarrow$ Deletes a session and its transcript.
 
@@ -313,3 +326,13 @@ Public build/test commands live in `package.json`. `scripts/package-portable.cjs
 YAOC is MIT-licensed; npm and Cargo metadata and the root `LICENSE` agree. The metadata check verifies this alongside the app version. Packaging requires the project license and third-party notices before rotating binaries, and includes both files in `release/`. Third-party terms remain separate.
 
 Profile controls update React state; the guarded, debounced settings effect persists changes and reports errors. Direct disconnect persistence uses the same successful-load guard. A failed initial load keeps disk writes disabled, including when profiles are added in Settings.
+
+### Gateway reasoning choices
+
+Session rows and matching model defaults may advertise `thinkingLevels` (`{ id, label }` choices), legacy `thinkingOptions`, and `thinkingDefault`. YAOC preserves advertised IDs, labels, and order; session metadata takes precedence over the current model catalog. Defaults from a different model are not reused. Model changes clear stale metadata and refresh session choices. Older Gateways fall back to the existing compatibility levels; an explicit empty list stays empty.
+
+The reasoning popup presents Default (clear the override), None (the advertised `off`/`none` ID), and Adaptive as separate buttons. Unsupported modes are disabled. Ordered effort levels appear on the slider; a model with one remaining choice uses a button instead. The selected mode is highlighted and mutes the slider; selecting a fixed level highlights the slider. Changing effort submits through `sessions.patch`, with rollback on rejection and connection/session guards for delayed replies. Gateway-provided defaults are shown separately from an explicit session selection.
+
+### Canonical session identity
+
+YAOC scopes short session names to `agent:<agentId>:<name>` for every agent, including `main`. New sessions store the qualified key and retain the typed name as a display label. Persisted selections and Gateway lists are normalized; short/qualified aliases collapse to one row while retaining human labels and authoritative Gateway metadata. Sending, history, aborts, drafts, scroll positions, streaming indicators, and unread state share this identity. Events derive their agent from a qualified key even when `agentId` is omitted, preventing cross-agent rows and replies. Creating an existing alias selects it instead of clearing its transcript. Unscoped `global`/`unknown` keys remain unchanged.

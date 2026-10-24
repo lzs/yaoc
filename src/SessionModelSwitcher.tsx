@@ -4,10 +4,15 @@ import { Check, ChevronDown, RefreshCw, Search } from 'lucide-react';
 import {
   changeSessionModel,
   loadSessionModels,
+  loadSessionThinking,
+  normalizeThinkingMetadata,
+  reasoningOptions,
+  thinkingLevelLabel,
   modelRef,
   ModelOption,
   toGatewaySessionKey,
 } from './models';
+import type { ThinkingMetadata } from './types';
 
 interface Props {
   connectionId: string;
@@ -17,10 +22,13 @@ interface Props {
   model?: string;
   modelProvider?: string;
   thinkingLevel?: string;
+  thinkingMetadata?: ThinkingMetadata;
   streaming: boolean;
   onBusyChange: (busy: boolean) => void;
   onThinkingChanged: (thinkingLevel: string) => void;
-  onModelChanged: (selection: { model: string; modelProvider: string }) => void;
+  onModelChanged: (
+    selection: ThinkingMetadata & { model: string; modelProvider: string; thinkingLevel?: string }
+  ) => void;
 }
 
 export default function SessionModelSwitcher(props: Props) {
@@ -42,6 +50,7 @@ export default function SessionModelSwitcher(props: Props) {
   const [popup, setPopup] = useState<'model' | 'thinking' | null>(null);
   const [search, setSearch] = useState('');
   const [draftThinking, setDraftThinking] = useState(props.thinkingLevel || '');
+  const [lastSliderLevel, setLastSliderLevel] = useState('');
   const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({});
   const modelButton = useRef<HTMLButtonElement>(null);
   const thinkingButton = useRef<HTMLButtonElement>(null);
@@ -55,11 +64,32 @@ export default function SessionModelSwitcher(props: Props) {
   const current = modelRef(model, modelProvider);
   const modelLabel =
     models.find((choice) => choice.ref === current)?.label || current || 'Agent default';
-  const thinkingLevels = ['', 'off', 'minimal', 'low', 'medium', 'high'];
-  if (props.thinkingLevel && !thinkingLevels.includes(props.thinkingLevel))
-    thinkingLevels.push(props.thinkingLevel);
-  const thinkingLabel = (level: string) =>
-    level ? level.charAt(0).toUpperCase() + level.slice(1) : 'Default';
+  const metadata = {
+    ...normalizeThinkingMetadata(models.find((choice) => choice.ref === current)),
+    ...normalizeThinkingMetadata(props.thinkingMetadata),
+  };
+  const thinkingOptions = reasoningOptions(metadata, props.thinkingLevel || '');
+  const sliderOptions = thinkingOptions.filter(
+    (option) => !['off', 'none', 'adaptive'].includes(option.id)
+  );
+  const noneOption = thinkingOptions.find((option) => option.id === 'off' || option.id === 'none');
+  const adaptiveOption = thinkingOptions.find((option) => option.id === 'adaptive');
+  const sliderActive = sliderOptions.some((option) => option.id === draftThinking);
+  const sliderIndex = Math.max(
+    0,
+    sliderOptions.findIndex(
+      (option) => option.id === (sliderActive ? draftThinking : lastSliderLevel)
+    )
+  );
+  const thinkingLabel = (level: string) => {
+    if (level === 'off' || level === 'none') return 'None';
+    return (
+      thinkingOptions.find((option) => option.id === level)?.label || thinkingLevelLabel(level)
+    );
+  };
+  const defaultLabel = metadata.thinkingDefault
+    ? 'Default (' + thinkingLabel(metadata.thinkingDefault) + ')'
+    : 'Default';
   const choices = [
     { ref: '', label: 'Agent default', available: true },
     ...(current && !models.some((choice) => choice.ref === current)
@@ -78,7 +108,7 @@ export default function SessionModelSwitcher(props: Props) {
   useEffect(() => {
     setPopup(null);
     setSearch('');
-  }, [scope, streaming]);
+  }, [scope, streaming, current]);
   useEffect(() => {
     setDraftThinking(props.thinkingLevel || '');
   }, [props.thinkingLevel, scope]);
@@ -102,7 +132,10 @@ export default function SessionModelSwitcher(props: Props) {
     observer.observe(trigger);
     window.addEventListener('resize', position);
     window.addEventListener('scroll', position, true);
-    (popup === 'model' ? searchRef : sliderRef).current?.focus();
+    const focusTarget =
+      (popup === 'model' ? searchRef : sliderRef).current ||
+      popupRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    focusTarget?.focus();
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', position);
@@ -161,7 +194,7 @@ export default function SessionModelSwitcher(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [scope, reload]);
+  }, [scope, reload, current]);
 
   async function handleChange(selection: string) {
     const api = window.openclawApi;
@@ -173,7 +206,15 @@ export default function SessionModelSwitcher(props: Props) {
     onBusyChange(true);
     try {
       const result = await changeSessionModel(api.request, sessionKey, selection, agentId);
-      if (latestScope.current === requestScope) onModelChanged(result);
+      if (latestScope.current !== requestScope) return;
+      // Older Gateways may not include capabilities in the patch response.
+      let fresh: ThinkingMetadata & { thinkingLevel?: string } = {};
+      try {
+        fresh = await loadSessionThinking(api.request, agentId, sessionKey);
+      } catch {
+        /* Use model catalog metadata or the legacy compatibility choices. */
+      }
+      if (latestScope.current === requestScope) onModelChanged({ ...result, ...fresh });
     } catch (err: any) {
       if (latestScope.current === requestScope)
         setError(`Could not change model: ${err?.message || String(err)}`);
@@ -187,6 +228,10 @@ export default function SessionModelSwitcher(props: Props) {
   async function handleThinkingChange(selection: string) {
     const api = window.openclawApi;
     if (!api || !connected || streaming || changeInFlight.current) return;
+    if (selection && !thinkingOptions.some((option) => option.id === selection)) return;
+    setDraftThinking(selection);
+    if (sliderOptions.some((option) => option.id === selection)) setLastSliderLevel(selection);
+    if (selection === (props.thinkingLevel || '')) return;
     const requestScope = scope;
     changeInFlight.current = true;
     setChanging(true);
@@ -197,8 +242,17 @@ export default function SessionModelSwitcher(props: Props) {
       const result = await api.request('sessions.patch', { key, thinkingLevel: selection || null });
       if (result?.ok === false)
         throw new Error(result.error?.message || 'The Gateway rejected the reasoning change.');
-      if (latestScope.current === requestScope)
-        props.onThinkingChanged(result?.entry?.thinkingLevel ?? selection);
+      if (latestScope.current === requestScope) {
+        // Clearing the override remains Default even if the Gateway returns an effective level.
+        const saved =
+          selection === ''
+            ? ''
+            : typeof result?.entry?.thinkingLevel === 'string'
+              ? result.entry.thinkingLevel
+              : selection;
+        setDraftThinking(saved);
+        props.onThinkingChanged(saved);
+      }
     } catch (err: any) {
       if (latestScope.current === requestScope) {
         setDraftThinking(props.thinkingLevel || '');
@@ -263,7 +317,7 @@ export default function SessionModelSwitcher(props: Props) {
             setPopup(popup === 'thinking' ? null : 'thinking');
           }}
         >
-          <span>{thinkingLabel(props.thinkingLevel || '')}</span>
+          <span>{props.thinkingLevel ? thinkingLabel(props.thinkingLevel) : defaultLabel}</span>
           <ChevronDown size={12} className={popup === 'thinking' ? 'selector-chevron-open' : ''} />
         </button>
         <span id="session-model-status" className="session-model-status" role="status">
@@ -367,53 +421,129 @@ export default function SessionModelSwitcher(props: Props) {
               <>
                 <div className="thinking-popup-heading">
                   <span>Effort</span>
-                  <strong aria-live="polite">{thinkingLabel(draftThinking)}</strong>
+                  <strong aria-live="polite">
+                    {draftThinking ? thinkingLabel(draftThinking) : defaultLabel}
+                  </strong>
                 </div>
-                <div className="thinking-slider-track">
-                  <div className="thinking-slider-ticks" aria-hidden="true">
-                    {thinkingLevels.map((level) => (
-                      <i key={level} />
-                    ))}
-                  </div>
-                  <input
-                    ref={sliderRef}
-                    type="range"
-                    min={0}
-                    max={thinkingLevels.length - 1}
-                    step={1}
-                    value={Math.max(0, thinkingLevels.indexOf(draftThinking))}
-                    aria-label="Reasoning effort"
-                    aria-valuetext={thinkingLabel(draftThinking)}
+                <div className="thinking-modes" role="group" aria-label="Reasoning mode">
+                  <button
+                    type="button"
+                    aria-pressed={draftThinking === ''}
                     disabled={changing}
-                    onChange={(event) =>
-                      setDraftThinking(thinkingLevels[Number(event.target.value)])
+                    title="Use the Gateway's configured default"
+                    onClick={() => void handleThinkingChange('')}
+                  >
+                    Default
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={draftThinking === 'off' || draftThinking === 'none'}
+                    disabled={changing || !noneOption}
+                    title={noneOption ? 'Turn reasoning off' : 'Not advertised for this model'}
+                    onClick={() => noneOption && void handleThinkingChange(noneOption.id)}
+                  >
+                    None
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={draftThinking === 'adaptive'}
+                    disabled={changing || !adaptiveOption}
+                    title={
+                      adaptiveOption
+                        ? 'Let the provider manage reasoning effort'
+                        : 'Not advertised for this model'
                     }
-                    onPointerUp={(event) => {
-                      const level = thinkingLevels[Number(event.currentTarget.value)];
-                      if (level !== (props.thinkingLevel || '')) void handleThinkingChange(level);
-                    }}
-                    onKeyUp={(event) => {
-                      if (
-                        [
-                          'ArrowLeft',
-                          'ArrowRight',
-                          'ArrowUp',
-                          'ArrowDown',
-                          'Home',
-                          'End',
-                          'PageUp',
-                          'PageDown',
-                        ].includes(event.key) &&
-                        draftThinking !== (props.thinkingLevel || '')
-                      )
-                        void handleThinkingChange(draftThinking);
-                    }}
-                    onBlur={() => {
-                      if (draftThinking !== (props.thinkingLevel || ''))
-                        void handleThinkingChange(draftThinking);
-                    }}
-                  />
+                    onClick={() => adaptiveOption && void handleThinkingChange(adaptiveOption.id)}
+                  >
+                    Adaptive
+                  </button>
                 </div>
+                {sliderOptions.length > 1 ? (
+                  <>
+                    <div
+                      className={
+                        'thinking-slider-track ' + (sliderActive ? 'is-active' : 'is-muted')
+                      }
+                    >
+                      <div className="thinking-slider-ticks" aria-hidden="true">
+                        {sliderOptions.map((option) => (
+                          <i key={option.id} title={option.label} />
+                        ))}
+                      </div>
+                      <input
+                        ref={sliderRef}
+                        type="range"
+                        min={0}
+                        max={sliderOptions.length - 1}
+                        step={1}
+                        value={sliderIndex}
+                        aria-label="Reasoning effort"
+                        aria-valuetext={sliderOptions[sliderIndex]?.label}
+                        aria-describedby="thinking-slider-status"
+                        disabled={changing}
+                        onChange={(event) => {
+                          const level = sliderOptions[Number(event.target.value)].id;
+                          setLastSliderLevel(level);
+                          setDraftThinking(level);
+                        }}
+                        onPointerUp={(event) => {
+                          const level = sliderOptions[Number(event.currentTarget.value)]?.id;
+                          if (level) void handleThinkingChange(level);
+                        }}
+                        onKeyUp={(event) => {
+                          if (
+                            [
+                              'ArrowLeft',
+                              'ArrowRight',
+                              'ArrowUp',
+                              'ArrowDown',
+                              'Home',
+                              'End',
+                              'PageUp',
+                              'PageDown',
+                            ].includes(event.key)
+                          ) {
+                            const level = sliderOptions[Number(event.currentTarget.value)]?.id;
+                            if (level) void handleThinkingChange(level);
+                          }
+                        }}
+                        onPointerCancel={() => setDraftThinking(props.thinkingLevel || '')}
+                      />
+                    </div>
+                    <div className="thinking-slider-labels" aria-hidden="true">
+                      <span>{sliderOptions[0].label}</span>
+                      <span>{sliderOptions[sliderOptions.length - 1].label}</span>
+                    </div>
+                  </>
+                ) : sliderOptions.length === 1 ? (
+                  <div className="thinking-modes">
+                    <button
+                      type="button"
+                      aria-pressed={sliderActive}
+                      disabled={changing}
+                      onClick={() => void handleThinkingChange(sliderOptions[0].id)}
+                    >
+                      {sliderOptions[0].label}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="thinking-options-note">
+                    No adjustable effort levels for this model.
+                  </p>
+                )}
+                <p className="thinking-options-note" id="thinking-slider-status">
+                  {sliderOptions.length === 0
+                    ? 'Only the advertised modes are available.'
+                    : sliderActive
+                      ? 'Fixed effort selected.'
+                      : 'Choose an effort level to override this mode.'}
+                </p>
+                {props.thinkingLevel &&
+                  !thinkingOptions.some((option) => option.id === props.thinkingLevel) && (
+                    <p className="thinking-options-note">
+                      The saved setting is not advertised for this model.
+                    </p>
+                  )}
               </>
             )}
           </div>,

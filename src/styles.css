@@ -322,18 +322,19 @@ textarea {
 .session-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 4px 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .session-item {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 6px 6px 6px 8px;
+  padding: 2px 6px 2px 8px;
   border-radius: 8px;
   cursor: pointer;
   border: 1px solid transparent;
@@ -1073,16 +1074,22 @@ textarea {
   overflow: auto;
 }
 
+.model-popup {
+  padding: 6px;
+  border-radius: 12px;
+}
+
 .model-search {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
-  margin-bottom: 8px;
-  padding: 10px 12px;
+  margin-bottom: 4px;
+  min-height: 34px;
+  padding: 6px 10px;
   background: var(--bg-root);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--text-muted);
 }
 
@@ -1106,22 +1113,25 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
-  padding: 13px 14px;
+  padding: 5px 10px;
+  line-height: 20px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 7px;
   background: transparent;
   color: var(--text-main);
   text-align: left;
   cursor: pointer;
 }
 .model-popup-option + .model-popup-option {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .model-popup-option span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .model-popup-option svg {
   flex-shrink: 0;
@@ -1844,4 +1854,76 @@ textarea {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-subtle);
   overflow-wrap: anywhere;
+}
+
+.thinking-modes {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.thinking-modes button {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-root);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.thinking-modes button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.thinking-modes button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: rgba(249, 115, 22, 0.12);
+  color: var(--text-accent);
+}
+
+.thinking-modes button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.thinking-modes button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.thinking-slider-track.is-active {
+  box-shadow: 0 0 0 1px var(--accent);
+  background: rgba(249, 115, 22, 0.12);
+}
+
+.thinking-slider-track.is-active input::-webkit-slider-thumb {
+  background: var(--accent);
+}
+
+.thinking-slider-track.is-active input::-moz-range-thumb {
+  background: var(--accent);
+}
+
+.thinking-slider-track.is-muted {
+  opacity: 0.5;
+}
+
+.thinking-slider-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 4px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.thinking-options-note {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
 }

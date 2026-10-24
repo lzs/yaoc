@@ -9,9 +9,10 @@ YAOC supports Windows x64 and ARM64. It is not an official OpenClaw application.
 - Multiple Gateway profiles, device pairing, and cached device tokens.
 - Streaming chat, reasoning traces, tool activity, and execution approvals.
 - Image and file attachments through paste, drag-and-drop, or the attachment button.
-- Agent/session switching, model selection, reasoning effort, and session actions.
+- Agent/session switching, model selection, Gateway-advertised reasoning choices, and session actions.
 - Gateway workspace browsing and editing, where the Gateway exposes those methods.
 - Dark/light/system themes, resizable panels, a system tray icon, and a configurable global shortcut (default **Alt+Shift+3**).
+- Automatic Windows background efficiency mode while unfocused, minimized, or hidden in the tray.
 - An offline demo for trying the interface without a Gateway.
 
 ## Getting started
@@ -29,7 +30,7 @@ openclaw devices approve <request-id>
 
 For an offline preview, select **Built-in Demo Gateway (Offline Test)** and connect. Demo state is in memory; it is not a substitute for testing against a real Gateway.
 
-Press **Enter** to send, **Shift+Enter** for a new line, **Ctrl+S** to save an open workspace file, and **Ctrl+,** for Settings. Closing the window normally hides it to the tray. Use **Ctrl+Q** or the tray's Quit command to exit.
+Press **Enter** to send, **Shift+Enter** for a new line, **Ctrl+S** to save an open workspace file, **Ctrl+Page Up/Down** to switch sessions, and **Ctrl+,** for Settings. Closing the window normally hides it to the tray. Use **Ctrl+Q** or the tray's Quit command to exit.
 
 ## Development
 

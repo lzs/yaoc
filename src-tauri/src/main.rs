@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod efficiency;
 mod storage;
 
 use storage::atomic_write;
@@ -1130,6 +1131,38 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+// Re-read visibility, minimization, and focus on the main thread after window operations.
+fn refresh_efficiency_mode(app: &AppHandle) {
+    let app = app.clone();
+    let dispatch = app.clone();
+    if let Err(error) = dispatch.run_on_main_thread(move || {
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+        #[cfg(target_os = "windows")]
+        let focused = window
+            .hwnd()
+            .map(|handle| efficiency::window_has_focus(handle.0 as isize))
+            .unwrap_or(true);
+        #[cfg(not(target_os = "windows"))]
+        let focused = window.is_focused().unwrap_or(true);
+        let background = !window.is_visible().unwrap_or(true)
+            || window.is_minimized().unwrap_or(false)
+            || !focused;
+        match efficiency::set_background(background) {
+            Ok(true) => log_boot(if background {
+                "Background efficiency mode enabled (EcoQoS, idle priority)"
+            } else {
+                "Foreground CPU scheduling restored"
+            }),
+            Ok(false) => {}
+            Err(error) => log_boot(&format!("Could not update efficiency mode: {error}")),
+        }
+    }) {
+        log_boot(&format!("Could not schedule efficiency update: {error}"));
+    }
+}
+
 fn toggle_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let is_visible = window.is_visible().unwrap_or(false);
@@ -1145,6 +1178,7 @@ fn toggle_main_window(app: &AppHandle) {
             let _ = window.set_always_on_top(false);
             let _ = window.set_focus();
         }
+        refresh_efficiency_mode(app);
     }
 }
 
@@ -1446,6 +1480,21 @@ fn spawn_global_hotkey_listener(app: AppHandle, initial_hotkey: String) {
                 tx: std::sync::Mutex::new(req_tx),
             });
 
+            // Share the existing native message loop; no polling timer or extra thread.
+            let callback_app = app.clone();
+            let _foreground_listener = match efficiency::watch_foreground(move || {
+                refresh_efficiency_mode(&callback_app);
+            }) {
+                Ok(listener) => Some(listener),
+                Err(error) => {
+                    log_boot(&format!(
+                        "Could not initialize efficiency focus listener: {error}"
+                    ));
+                    None
+                }
+            };
+            refresh_efficiency_mode(&app);
+
             let mut current_hotkey: Option<(u32, u32, String)> = None;
 
             if let Ok(Some((mods, vk, label))) = parse_win32_hotkey(&initial_hotkey) {
@@ -1616,12 +1665,22 @@ fn main() {
     tauri::Builder::default()
         .manage(gw_state)
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if TRAY_HANDLES.get().is_none() {
-                    return;
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if TRAY_HANDLES.get().is_none() {
+                        return;
+                    }
+                    api.prevent_close();
+                    let _ = window.hide();
+                    refresh_efficiency_mode(window.app_handle());
                 }
-                api.prevent_close();
-                let _ = window.hide();
+                tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) => {
+                    refresh_efficiency_mode(window.app_handle());
+                }
+                _ => {}
             }
         })
         .setup(|app| {

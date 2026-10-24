@@ -5,34 +5,62 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');
 const origin = 'http://127.0.0.1:4179';
+const sourcePreview = process.env.YAOC_TEST_SOURCE_PREVIEW === '1';
 
 async function openApp(browser, options = {}) {
   const page = await browser.newPage({ viewport: { width: 1360, height: 860 } });
   const config = JSON.parse(await fs.readFile(path.join(root, 'src-tauri/tauri.conf.json')));
-  await page.route(`${origin}/**`, async (route) => {
-    const pathname = decodeURIComponent(new URL(route.request().url()).pathname);
-    const file = path.resolve(dist, '.' + (pathname === '/' ? '/index.html' : pathname));
-    if (!file.startsWith(dist + path.sep)) return route.abort();
-    const extension = path.extname(file);
-    const contentType =
-      {
-        '.js': 'text/javascript',
-        '.css': 'text/css',
-        '.svg': 'image/svg+xml',
-        '.png': 'image/png',
-        '.html': 'text/html',
-      }[extension] || 'application/octet-stream';
-    await route.fulfill({
-      body: await fs.readFile(file),
-      contentType,
-      headers: { 'Content-Security-Policy': config.app.security.csp },
+  if (!sourcePreview)
+    await page.route(`${origin}/**`, async (route) => {
+      const pathname = decodeURIComponent(new URL(route.request().url()).pathname);
+      const file = path.resolve(dist, '.' + (pathname === '/' ? '/index.html' : pathname));
+      if (!file.startsWith(dist + path.sep)) return route.abort();
+      const extension = path.extname(file);
+      const contentType =
+        {
+          '.js': 'text/javascript',
+          '.css': 'text/css',
+          '.svg': 'image/svg+xml',
+          '.png': 'image/png',
+          '.html': 'text/html',
+        }[extension] || 'application/octet-stream';
+      await route.fulfill({
+        body: await fs.readFile(file),
+        contentType,
+        headers: { 'Content-Security-Policy': config.app.security.csp },
+      });
     });
-  });
   await page.addInitScript((options) => {
     localStorage.setItem('openclaw.theme.v1', options.theme || 'dark');
     const callbacks = new Set();
+    const gatewayCallbacks = new Set();
+    window.testEmitGatewayEvent = (frame) => {
+      for (const callback of gatewayCallbacks) callback(frame);
+    };
     let thinkingLevel = 'medium';
     let model = 'provider/model-a';
+    const thinkingMetadata = () =>
+      options.legacyThinking
+        ? {}
+        : {
+            thinkingLevels:
+              options.thinkingLevels ||
+              (model === 'provider/model-12'
+                ? [
+                    { id: 'off', label: 'None' },
+                    { id: 'low', label: 'Low' },
+                    { id: 'high', label: 'High' },
+                  ]
+                : [
+                    { id: 'off', label: 'None' },
+                    { id: 'adaptive', label: 'Adaptive' },
+                    { id: 'low', label: 'Low' },
+                    { id: 'medium', label: 'Medium' },
+                    { id: 'high', label: 'High' },
+                    { id: 'xhigh', label: 'Extra high' },
+                  ]),
+            thinkingDefault: model === 'provider/model-12' ? 'low' : 'adaptive',
+          };
     window.testRequests = [];
     window.testSaves = [];
     window.testHotkeys = [];
@@ -59,7 +87,10 @@ async function openApp(browser, options = {}) {
         callbacks.add(callback);
         return () => callbacks.delete(callback);
       },
-      onGatewayEvent: () => () => {},
+      onGatewayEvent: (callback) => {
+        gatewayCallbacks.add(callback);
+        return () => gatewayCallbacks.delete(callback);
+      },
       connect: async () => {
         for (const callback of callbacks) callback({ state: 'connected', endpoint: 'mock://demo' });
         return { ok: true };
@@ -77,15 +108,27 @@ async function openApp(browser, options = {}) {
         if (method === 'agents.list') return { agents: [{ id: 'main', name: 'Assistant' }] };
         if (method === 'sessions.list')
           return {
-            sessions: [
-              {
-                key: 'main',
-                agentId: 'main',
-                model: model.split('/')[1],
-                modelProvider: 'provider',
-                thinkingLevel,
-              },
-            ],
+            sessions: options.sessionAliases
+              ? [
+                  { key: 'test-2', agentId: 'main', label: 'Friendly test' },
+                  {
+                    key: 'agent:main:test-2',
+                    agentId: 'main',
+                    model: 'model-a',
+                    modelProvider: 'provider',
+                    thinkingLevel,
+                  },
+                ]
+              : [
+                  {
+                    key: 'main',
+                    agentId: 'main',
+                    model: model.split('/')[1],
+                    modelProvider: 'provider',
+                    thinkingLevel,
+                    ...thinkingMetadata(),
+                  },
+                ],
           };
         if (method === 'models.list')
           return {
@@ -93,15 +136,23 @@ async function openApp(browser, options = {}) {
               id: i === 0 ? 'model-a' : `model-${i}`,
               provider: 'provider',
               name: i === 0 ? 'Model A' : `Model ${i}`,
+              ...thinkingMetadata(),
             })),
           };
         if (method === 'sessions.patch') {
           if ('model' in params) model = params.model;
-          if ('thinkingLevel' in params) thinkingLevel = params.thinkingLevel;
+          if ('thinkingLevel' in params) {
+            if (options.rejectThinking) throw new Error('Reasoning denied by fixture');
+            thinkingLevel = params.thinkingLevel;
+          }
           return {
             ok: true,
             entry: { thinkingLevel },
-            resolved: { model: model?.split('/')[1] || '', modelProvider: 'provider' },
+            resolved: {
+              model: model?.split('/')[1] || '',
+              modelProvider: 'provider',
+              ...thinkingMetadata(),
+            },
           };
         }
         if (method === 'chat.history')
@@ -166,6 +217,64 @@ async function openApp(browser, options = {}) {
           await page.keyboard.press('Escape');
         }
       }
+      await effort.click();
+      const popup = page.getByRole('dialog', { name: 'Reasoning effort settings' });
+      const slider = popup.getByRole('slider', { name: 'Reasoning effort' });
+      await popup.getByRole('button', { name: 'Adaptive', exact: true }).click();
+      await page.waitForFunction(() =>
+        window.testRequests.some(
+          (r) => r.method === 'sessions.patch' && r.params.thinkingLevel === 'adaptive'
+        )
+      );
+      assert.equal(
+        await popup
+          .getByRole('button', { name: 'Adaptive', exact: true })
+          .getAttribute('aria-pressed'),
+        'true'
+      );
+      assert.equal(
+        await popup.locator('.thinking-slider-track').getAttribute('class'),
+        'thinking-slider-track is-muted'
+      );
+      await slider.press('End');
+      await page.waitForFunction(() =>
+        window.testRequests.some(
+          (r) => r.method === 'sessions.patch' && r.params.thinkingLevel === 'xhigh'
+        )
+      );
+      assert.equal(
+        await popup
+          .getByRole('button', { name: 'Adaptive', exact: true })
+          .getAttribute('aria-pressed'),
+        'false'
+      );
+      assert.equal(
+        await popup.locator('.thinking-slider-track').getAttribute('class'),
+        'thinking-slider-track is-active'
+      );
+      await popup.getByRole('button', { name: 'None', exact: true }).click();
+      await page.waitForFunction(() =>
+        window.testRequests.some(
+          (r) => r.method === 'sessions.patch' && r.params.thinkingLevel === 'off'
+        )
+      );
+      assert.equal(
+        await popup.getByRole('button', { name: 'None', exact: true }).getAttribute('aria-pressed'),
+        'true'
+      );
+      await popup.getByRole('button', { name: 'Default', exact: true }).click();
+      await page.waitForFunction(() =>
+        window.testRequests.some(
+          (r) => r.method === 'sessions.patch' && r.params.thinkingLevel === null
+        )
+      );
+      assert.equal(
+        await popup
+          .getByRole('button', { name: 'Default', exact: true })
+          .getAttribute('aria-pressed'),
+        'true'
+      );
+      await page.keyboard.press('Escape');
       await model.click();
       await page.getByRole('textbox', { name: 'Search models' }).fill('Model 12');
       await page.getByRole('textbox', { name: 'Search models' }).press('ArrowDown');
@@ -176,6 +285,10 @@ async function openApp(browser, options = {}) {
         )
       );
       await effort.click();
+      assert.equal(
+        await page.getByRole('button', { name: 'Adaptive', exact: true }).isDisabled(),
+        true
+      );
       await page.getByRole('slider', { name: 'Reasoning effort' }).press('End');
       await page.waitForFunction(() =>
         window.testRequests.some(
@@ -200,6 +313,141 @@ async function openApp(browser, options = {}) {
       assert.deepEqual(errors, []);
       await page.close();
     }
+    const created = await openApp(browser);
+    await created.locator('.message-body').waitFor();
+    await created.getByTitle('New Session', { exact: true }).click();
+    await created.getByPlaceholder('Session key (e.g. feature-x)').fill('test-2');
+    await created.getByPlaceholder('Session key (e.g. feature-x)').press('Enter');
+    assert.equal(
+      await created
+        .locator('.session-key')
+        .filter({ hasText: /^test-2$/ })
+        .count(),
+      1
+    );
+    const composer = created.getByRole('textbox', { name: 'Message Assistant', exact: true });
+    await composer.fill('Hello');
+    await composer.press('Enter');
+    await created.waitForFunction(() =>
+      window.testRequests.some(
+        (r) => r.method === 'chat.send' && r.params.sessionKey === 'agent:main:test-2'
+      )
+    );
+    await created.evaluate(() =>
+      window.testEmitGatewayEvent({
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:main:test-2',
+          runId: 'test-run',
+          state: 'delta',
+          delta: 'Immediate canonical reply',
+        },
+      })
+    );
+    await created
+      .locator('.message-body')
+      .filter({ hasText: 'Immediate canonical reply' })
+      .waitFor();
+    assert.equal(
+      await created.locator('.session-item').count(),
+      2,
+      'No duplicate row after qualified event'
+    );
+    assert.equal(
+      await created
+        .locator('.session-key')
+        .filter({ hasText: /^agent:main:test-2$/ })
+        .count(),
+      0
+    );
+    await created.evaluate(() =>
+      window.testEmitGatewayEvent({
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:main:test-2',
+          runId: 'test-run',
+          state: 'final',
+          message: { content: 'Immediate canonical reply' },
+        },
+      })
+    );
+    await created.getByRole('button', { name: 'Send message', exact: true }).waitFor();
+    assert.equal(
+      await created.getByRole('button', { name: 'Stop response', exact: true }).count(),
+      0
+    );
+    assert.equal(await created.locator('.session-status-spinner').count(), 0);
+    await created.close();
+    const aliases = await openApp(browser, { sessionAliases: true });
+    await aliases.locator('.message-body').waitFor();
+    assert.equal(
+      await aliases.locator('.session-item').count(),
+      1,
+      'Legacy and qualified list aliases collapse'
+    );
+    assert.equal(await aliases.locator('.session-key').textContent(), 'Friendly test');
+    assert(
+      await aliases.evaluate(() =>
+        window.testRequests.some(
+          (r) => r.method === 'chat.history' && r.params.sessionKey === 'agent:main:test-2'
+        )
+      )
+    );
+    await aliases.close();
+    const legacy = await openApp(browser, { legacyThinking: true });
+    await legacy.locator('.message-body').waitFor();
+    await legacy.getByRole('button', { name: 'Reasoning effort', exact: true }).click();
+    assert.equal(
+      await legacy.getByRole('button', { name: 'Adaptive', exact: true }).isDisabled(),
+      true
+    );
+    assert.equal(
+      await legacy.getByRole('slider', { name: 'Reasoning effort' }).getAttribute('max'),
+      '3'
+    );
+    await legacy.close();
+    const binary = await openApp(browser, {
+      thinkingLevels: [
+        { id: 'off', label: 'None' },
+        { id: 'on', label: 'On' },
+      ],
+    });
+    await binary.locator('.message-body').waitFor();
+    await binary.getByRole('button', { name: 'Reasoning effort', exact: true }).click();
+    assert.equal(await binary.getByRole('slider').count(), 0);
+    await binary.getByRole('button', { name: 'On', exact: true }).click();
+    await binary.waitForFunction(() =>
+      window.testRequests.some(
+        (r) => r.method === 'sessions.patch' && r.params.thinkingLevel === 'on'
+      )
+    );
+    await binary.close();
+    const empty = await openApp(browser, { thinkingLevels: [] });
+    await empty.locator('.message-body').waitFor();
+    await empty.getByRole('button', { name: 'Reasoning effort', exact: true }).click();
+    assert.equal(await empty.getByRole('slider').count(), 0);
+    assert.equal(await empty.getByRole('button', { name: 'None', exact: true }).isDisabled(), true);
+    assert.equal(
+      await empty.getByRole('button', { name: 'Adaptive', exact: true }).isDisabled(),
+      true
+    );
+    await empty.close();
+    const rejected = await openApp(browser, { rejectThinking: true });
+    await rejected.locator('.message-body').waitFor();
+    await rejected.getByRole('button', { name: 'Reasoning effort', exact: true }).click();
+    await rejected.getByRole('button', { name: 'Adaptive', exact: true }).click();
+    await rejected.getByRole('alert').filter({ hasText: 'Reasoning denied by fixture' }).waitFor();
+    assert.equal(
+      await rejected
+        .getByRole('button', { name: 'Adaptive', exact: true })
+        .getAttribute('aria-pressed'),
+      'false'
+    );
+    assert.equal(
+      await rejected.locator('.thinking-slider-track').getAttribute('class'),
+      'thinking-slider-track is-active'
+    );
+    await rejected.close();
     const saved = await openApp(browser, { hotkey: 'Control+Alt+8' });
     await saved.locator('.message-body').waitFor();
     assert.equal(await saved.evaluate(() => window.testHotkeys.at(-1)), 'Control+Alt+8');
@@ -230,7 +478,10 @@ async function openApp(browser, options = {}) {
     await saveFailed.getByRole('alert').filter({ hasText: 'Could not save settings' }).waitFor();
     await saveFailed.close();
     console.log(
-      'PASS: production CSP/escaped Markdown, both themes, popup bounds, model/reasoning changes, attachments, send/stop, default/saved hotkeys, and profile-load failure protection.'
+      (sourcePreview
+        ? 'PASS: source preview/escaped Markdown,'
+        : 'PASS: production CSP/escaped Markdown,') +
+        ' both themes, popup bounds, model/reasoning changes, attachments, send/stop, default/saved hotkeys, and profile-load failure protection.'
     );
   } finally {
     await browser.close();

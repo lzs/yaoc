@@ -44,7 +44,12 @@ import {
 
 import { applyTheme, loadTheme, saveTheme, Theme } from './theme';
 import SessionModelSwitcher from './SessionModelSwitcher';
-import { toGatewaySessionKey } from './models';
+import {
+  normalizeSessions,
+  sessionAgentId,
+  sessionThinkingMetadata,
+  toGatewaySessionKey,
+} from './models';
 import { hasMarkdownSyntax, MarkdownContent } from './markdown';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
@@ -403,15 +408,21 @@ export default function App() {
     const saved = loadLocalUiState();
     const sKey = saved.selectedSessionKey || 'main';
     const aId = saved.selectedAgentId || 'main';
-    return sKey !== 'main'
-      ? [
-          { key: sKey, agentId: aId, label: sKey },
-          { key: 'main', agentId: aId, label: 'Primary Session' },
-        ]
-      : [{ key: 'main', agentId: aId, label: 'Primary Session' }];
+    return normalizeSessions(
+      sKey !== 'main'
+        ? [
+            { key: sKey, agentId: aId, label: sKey },
+            { key: 'main', agentId: aId, label: 'Primary Session' },
+          ]
+        : [{ key: 'main', agentId: aId, label: 'Primary Session' }],
+      aId
+    );
   });
-  const [selectedSessionKey, setSelectedSessionKey] = useState<string>(
-    () => loadLocalUiState().selectedSessionKey || 'main'
+  const [selectedSessionKey, setSelectedSessionKey] = useState<string>(() =>
+    toGatewaySessionKey(
+      loadLocalUiState().selectedAgentId || 'main',
+      loadLocalUiState().selectedSessionKey || 'main'
+    )
   );
   const [newSessionKeyInput, setNewSessionKeyInput] = useState<string>('');
   const [showNewSessionInput, setShowNewSessionInput] = useState(false);
@@ -456,6 +467,12 @@ export default function App() {
     }));
   }
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const sessionListRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    sessionListRef.current
+      ?.querySelector<HTMLElement>('.session-item.active')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [selectedSessionKey, sessions]);
   useLayoutEffect(() => {
     const input = composerInputRef.current;
     if (!input) return;
@@ -839,6 +856,10 @@ export default function App() {
                 : 'Alt+Shift+3',
         };
 
+        mergedUi.selectedSessionKey = toGatewaySessionKey(
+          mergedUi.selectedAgentId || 'main',
+          mergedUi.selectedSessionKey || 'main'
+        );
         uiStateRef.current = mergedUi;
         if (typeof mergedUi.globalHotkey === 'string') {
           setGlobalHotkey(mergedUi.globalHotkey);
@@ -854,18 +875,16 @@ export default function App() {
           );
         }
         if (mergedUi.selectedSessionKey) {
-          setSelectedSessionKey(mergedUi.selectedSessionKey);
+          const key = mergedUi.selectedSessionKey;
+          const agentId = mergedUi.selectedAgentId || 'main';
+          setSelectedSessionKey(key);
           setSessions((prev) =>
-            prev.some((s) => s.key === mergedUi.selectedSessionKey)
-              ? prev
-              : [
-                  {
-                    key: mergedUi.selectedSessionKey!,
-                    agentId: mergedUi.selectedAgentId || 'main',
-                    label: mergedUi.selectedSessionKey!,
-                  },
-                  ...prev,
-                ]
+            normalizeSessions(
+              prev.some((s) => toGatewaySessionKey(s.agentId || agentId, s.key) === key)
+                ? prev
+                : [{ key, agentId, label: key.replace(/^agent:[^:]+:/, '') }, ...prev],
+              agentId
+            )
           );
         }
         if (typeof mergedUi.showWorkspacePane === 'boolean') {
@@ -953,7 +972,10 @@ export default function App() {
         const rawSessionKey = payload.sessionKey
           ? String(payload.sessionKey)
           : uiStateRef.current.selectedSessionKey || 'main';
-        const eventAgentId = payload.agentId ? String(payload.agentId) : currentAgent;
+        const eventAgentId = sessionAgentId(
+          rawSessionKey,
+          payload.agentId ? String(payload.agentId) : currentAgent
+        );
         const eventGatewayKey = toGatewaySessionKey(eventAgentId, rawSessionKey);
         const isTargetActiveSession =
           eventGatewayKey === activeGatewaySessionKeyRef.current ||
@@ -971,9 +993,9 @@ export default function App() {
             if (exists) return prev;
             return [
               {
-                key: rawSessionKey,
+                key: eventGatewayKey,
                 agentId: eventAgentId,
-                label: rawSessionKey,
+                label: eventGatewayKey.replace(/^agent:[^:]+:/, ''),
                 updatedAt: Date.now(),
               },
               ...prev,
@@ -1183,21 +1205,26 @@ export default function App() {
     }
 
     if (Array.isArray(sessRes?.sessions)) {
-      const list: SessionInfo[] =
+      const list: SessionInfo[] = normalizeSessions(
         sessRes.sessions.length > 0
           ? sessRes.sessions
-          : [{ key: 'main', agentId: currentAgent, label: 'Primary Session' }];
-
-      setSessions(list);
-
-      const exactMatch = list.find((s) => s.key === preferredSessionKey);
-      const suffixedMatch = list.find(
-        (s) =>
-          s.key === `agent:${currentAgent}:${preferredSessionKey}` ||
-          s.key.replace(/^agent:[^:]+:/, '') === preferredSessionKey
+          : [{ key: 'main', agentId: currentAgent, label: 'Primary Session' }],
+        currentAgent
       );
-      const resolvedKey = exactMatch?.key || suffixedMatch?.key || list[0].key;
+
+      const withThinking = list.map((session) => ({
+        ...session,
+        ...sessionThinkingMetadata(session, sessRes.defaults),
+      }));
+      setSessions(withThinking);
+
+      const preferredKey = toGatewaySessionKey(currentAgent, preferredSessionKey);
+      const resolvedKey =
+        list.find((session) => session.key === preferredKey)?.key || list[0]?.key || preferredKey;
       if (resolvedKey !== selectedSessionKey) {
+        // History can resolve before React commits the selection (for example with a fast Gateway).
+        activeGatewaySessionKeyRef.current = resolvedKey;
+        uiStateRef.current = { ...uiStateRef.current, selectedSessionKey: resolvedKey };
         setSelectedSessionKey(resolvedKey);
       }
       return resolvedKey;
@@ -1278,7 +1305,7 @@ export default function App() {
     const scrollKey = toGatewaySessionKey(agentOverride || selectedAgentId || 'main', sessionKey);
     const reqSeq = ++chatHistorySeqRef.current;
     try {
-      const res = await api.request('chat.history', { sessionKey, limit: 100 });
+      const res = await api.request('chat.history', { sessionKey: scrollKey, limit: 100 });
       if (reqSeq !== chatHistorySeqRef.current || scrollKey !== activeGatewaySessionKeyRef.current)
         return;
       const rawMessages = Array.isArray(res?.messages) ? res.messages : [];
@@ -1489,7 +1516,7 @@ export default function App() {
           ? cleanRelPath
           : `${workspaceRootPath}/${cleanRelPath}`;
         await api.request('sessions.files.set', {
-          sessionKey: selectedSessionKey || 'main',
+          sessionKey: toGatewaySessionKey(selectedAgentId, selectedSessionKey),
           path: fullTarget,
           content: fileContent,
         });
@@ -1644,7 +1671,7 @@ export default function App() {
       const res = await window.openclawApi?.request(
         'chat.send',
         {
-          sessionKey: selectedSessionKey,
+          sessionKey: activeGatewayKey,
           agentId: selectedAgentId,
           message: text,
           ...(rpcAttachments ? { attachments: rpcAttachments } : {}),
@@ -1675,7 +1702,7 @@ export default function App() {
     const activeGatewayKey = toGatewaySessionKey(selectedAgentId, selectedSessionKey);
     try {
       await window.openclawApi?.request('chat.abort', {
-        sessionKey: selectedSessionKey,
+        sessionKey: activeGatewayKey,
         runId: sessionRunIdsRef.current.get(activeGatewayKey) || undefined,
       });
     } catch {
@@ -1827,10 +1854,44 @@ export default function App() {
     return parts.join('+');
   }
 
-  // Global in-window shortcuts: Ctrl+, (Settings) & Ctrl+Q (Quit Confirmation)
+  // In-window shortcuts: session navigation, Settings, and quit confirmation.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isRecordingHotkey) return;
+      if (
+        e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        (e.key === 'PageUp' || e.key === 'PageDown')
+      ) {
+        if (
+          e.defaultPrevented ||
+          e.isComposing ||
+          showProfileModal ||
+          showQuitConfirmModal ||
+          lightboxImage ||
+          renamingSessionKey
+        )
+          return;
+        if (sessions.length === 0) return;
+        e.preventDefault();
+        const current = sessions.findIndex((session) => session.key === selectedSessionKey);
+        const offset = e.key === 'PageDown' ? 1 : -1;
+        const next =
+          current < 0
+            ? offset > 0
+              ? 0
+              : sessions.length - 1
+            : (current + offset + sessions.length) % sessions.length;
+        const target = sessions[next].key;
+        if (target !== selectedSessionKey) {
+          setSessionMenu(null);
+          handleSelectSession(target);
+          composerInputRef.current?.focus();
+        }
+        return;
+      }
       if (
         (e.ctrlKey || e.metaKey) &&
         !e.altKey &&
@@ -1859,7 +1920,17 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showQuitConfirmModal, isRecordingHotkey]);
+  }, [
+    showQuitConfirmModal,
+    isRecordingHotkey,
+    showProfileModal,
+    lightboxImage,
+    renamingSessionKey,
+    sessions,
+    selectedSessionKey,
+    selectedAgentId,
+    connStatus.state,
+  ]);
 
   // Drag resize handlers for left sidebar and right workspace panel
   useEffect(() => {
@@ -1975,11 +2046,19 @@ export default function App() {
     markSessionUnread(gatewayKey, false);
     markSessionStreaming(gatewayKey, false);
 
-    const remaining = sessions.filter((s) => s.key !== targetKey && s.key !== gatewayKey);
+    const remaining = sessions.filter(
+      (s) => toGatewaySessionKey(s.agentId || selectedAgentId, s.key) !== gatewayKey
+    );
     const nextSessions: SessionInfo[] =
       remaining.length > 0
         ? remaining
-        : [{ key: 'main', agentId: selectedAgentId, label: 'Primary Session' }];
+        : [
+            {
+              key: toGatewaySessionKey(selectedAgentId, 'main'),
+              agentId: selectedAgentId,
+              label: 'Primary Session',
+            },
+          ];
     setSessions(nextSessions);
 
     if (selectedSessionKey === targetKey || selectedSessionKey === gatewayKey) {
@@ -2030,36 +2109,53 @@ export default function App() {
   }
 
   function handleSelectSession(key: string) {
+    const gatewayKey = toGatewaySessionKey(selectedAgentId, key);
     saveCurrentSessionScrollPosition();
-    markSessionUnread(toGatewaySessionKey(selectedAgentId, key), false);
-    activeGatewaySessionKeyRef.current = toGatewaySessionKey(selectedAgentId, key);
-    setSelectedSessionKey(key);
-    if (connStatus.state === 'connected') {
-      loadChatHistory(key);
-    }
+    markSessionUnread(gatewayKey, false);
+    activeGatewaySessionKeyRef.current = gatewayKey;
+    uiStateRef.current = { ...uiStateRef.current, selectedSessionKey: gatewayKey };
+    setSelectedSessionKey(gatewayKey);
+    if (connStatus.state === 'connected') loadChatHistory(gatewayKey);
   }
 
   function handleCreateSession() {
     const cleaned = newSessionKeyInput.trim();
     if (!cleaned) return;
-    saveCurrentSessionScrollPosition();
-    if (!sessions.some((s) => s.key === cleaned)) {
-      setSessions((prev) => [
-        { key: cleaned, agentId: selectedAgentId, label: cleaned, updatedAt: Date.now() },
-        ...prev,
-      ]);
-    }
-    const scrollKey = toGatewaySessionKey(selectedAgentId, cleaned);
-    visitedSessionsRef.current.add(scrollKey);
-    sessionScrollTopRef.current.set(scrollKey, 0);
-    loadedSessionKeyRef.current = scrollKey;
-    pendingScrollActionRef.current = { type: 'bottom', sessionKey: scrollKey };
-    ++chatHistorySeqRef.current;
-    activeGatewaySessionKeyRef.current = scrollKey;
-    setSelectedSessionKey(cleaned);
-    setMessages([]);
+    const gatewayKey = toGatewaySessionKey(selectedAgentId, cleaned);
+    const existing = sessions.find(
+      (session) =>
+        toGatewaySessionKey(session.agentId || selectedAgentId, session.key) === gatewayKey
+    );
     setNewSessionKeyInput('');
     setShowNewSessionInput(false);
+    if (existing) {
+      handleSelectSession(existing.key);
+      return;
+    }
+    saveCurrentSessionScrollPosition();
+    setSessions((prev) =>
+      normalizeSessions(
+        [
+          {
+            key: gatewayKey,
+            agentId: selectedAgentId,
+            label: cleaned.replace(/^agent:[^:]+:/, ''),
+            updatedAt: Date.now(),
+          },
+          ...prev,
+        ],
+        selectedAgentId
+      )
+    );
+    visitedSessionsRef.current.add(gatewayKey);
+    sessionScrollTopRef.current.set(gatewayKey, 0);
+    loadedSessionKeyRef.current = gatewayKey;
+    pendingScrollActionRef.current = { type: 'bottom', sessionKey: gatewayKey };
+    ++chatHistorySeqRef.current;
+    activeGatewaySessionKeyRef.current = gatewayKey;
+    uiStateRef.current = { ...uiStateRef.current, selectedSessionKey: gatewayKey };
+    setSelectedSessionKey(gatewayKey);
+    setMessages([]);
   }
 
   function updateActiveProfileField<K extends keyof GatewayProfile>(
@@ -2256,7 +2352,7 @@ export default function App() {
             )}
           </div>
 
-          <div className="session-list">
+          <div className="session-list" ref={sessionListRef}>
             {sessions.map((s) => {
               const displayName = getSessionDisplayName(s);
               const isMenuOpen = sessionMenu?.sessionKey === s.key;
@@ -3138,6 +3234,7 @@ export default function App() {
                   thinkingLevel={
                     sessions.find((session) => session.key === selectedSessionKey)?.thinkingLevel
                   }
+                  thinkingMetadata={sessions.find((session) => session.key === selectedSessionKey)}
                   streaming={isStreaming}
                   onBusyChange={setIsChangingModel}
                   onThinkingChanged={(thinkingLevel) =>
