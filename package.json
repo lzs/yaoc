@@ -1,0 +1,51 @@
+{
+  "name": "yaoc",
+  "version": "2026.1.0",
+  "description": "Lightweight, non-blocking OpenClaw Gateway Chat & Workspace Client for Windows (x64 & ARM64)",
+  "private": true,
+  "scripts": {
+    "dev:vite": "vite",
+    "build:vite": "vite build",
+    "build:vite:release": "vite build --mode release",
+    "build:tauri": "npm run build:vite && cargo build --locked --release --manifest-path src-tauri/Cargo.toml",
+    "build:tauri:x64": "npm run build:vite && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnullvm",
+    "build:tauri:arm64": "npm run build:vite && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --target aarch64-pc-windows-gnullvm",
+    "build": "npm run build:tauri",
+    "start": "src-tauri\\target\\release\\yaoc.exe",
+    "dist:x64": "npm run build:tauri:x64",
+    "dist:arm64": "npm run build:tauri:arm64",
+    "dist:all": "npm run build:vite && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnullvm && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --target aarch64-pc-windows-gnullvm",
+    "release:x64": "npm run build:vite:release && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnullvm",
+    "release:arm64": "npm run build:vite:release && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --target aarch64-pc-windows-gnullvm",
+    "release": "npm run build:vite:release && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnullvm && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --target aarch64-pc-windows-gnullvm",
+    "check": "tsc --noEmit && node scripts/check-metadata.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "icons": "node scripts/generate-icons.cjs",
+    "package:portable": "node scripts/package-portable.cjs",
+    "notices": "node scripts/third-party-notices.cjs",
+    "test:browser": "node tests/browser-smoke.cjs"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "sharp": "^0.35.5",
+    "prettier": "^3.9.10",
+    "playwright": "^1.64.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "license": "MIT",
+  "author": "Lai Zit Seng"
+}

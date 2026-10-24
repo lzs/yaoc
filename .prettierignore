@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/vendor/
+package-lock.json
+AGENTS.md

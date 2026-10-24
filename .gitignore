@@ -1,0 +1,72 @@
+# Dependencies
+node_modules/
+
+# Frontend build outputs
+dist/
+dist-ssr/
+
+# Rust / Tauri build artifacts & generated schemas
+src-tauri/target/
+src-tauri/gen/schemas/
+**/*.rs.bk
+
+# Compiled release binaries & installers
+release/
+*.exe
+*.msi
+*.nsis
+
+# Keep vendored WebView2Loader DLLs needed for portable builds
+!src-tauri/vendor/**/*.dll
+
+# Local coding-agent instructions
+GEMINI.md
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+*.local.md
+.agents/
+.agent/
+_agents/
+_agent/
+
+# Environment variables & local secrets
+.env
+.env.local
+.env.*.local
+
+# Logs & crash dumps
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor & OS files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Credentials, private state, and review artifacts
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+gateway-profiles.json
+device-identity.json
+*.tmp
+coverage/
+playwright-report/
+test-results/

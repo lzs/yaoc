@@ -1,0 +1,38 @@
+[package]
+name = "yaoc"
+version = "2026.1.0"
+description = "Lightweight OpenClaw Gateway Chat & Workspace Client for Windows (x64 & ARM64)"
+license = "MIT"
+authors = ["Lai Zit Seng"]
+publish = false
+rust-version = "1.90"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+strip = true
+opt-level = "s"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+native-tls = "0.2"
+futures-util = "0.3"
+url = "2"
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+
+[patch.crates-io]
+webview2-com-sys = { path = "vendor/webview2-com-sys" }
