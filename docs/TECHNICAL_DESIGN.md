@@ -309,7 +309,7 @@ YAOC (pronounced “yoke”) expands to “Yet Another OpenClaw Chat”. The npm
 
 The existing `%APPDATA%\openclaw-chat` (or `%TEMP%\openclaw-chat`) data directory, `ai.openclaw.chat.lite` Tauri/WebView2 identifier, and browser storage keys remain stable compatibility identifiers. This preserves saved profiles, device identity, cached pairing tokens, theme, hotkeys and UI settings without a data migration. The embedded WebView2 loader patch is retained; its private extraction directory is `%LOCALAPPDATA%\yaoc\WebView2Loader`.
 
-YAOC uses its own orange yoke mark, defined in `src/assets/yaoc.svg`, in the header, welcome screen, and browser favicon. `scripts/generate-icons.cjs` renders that vector with Sharp into the PNGs and multi-resolution ICO in `src-tauri/icons`. Tauri embeds those assets for the executable, window/taskbar, and system tray (via `default_window_icon`). The OpenClaw lobster is not used as the client icon.
+YAOC uses a wide, softly rounded orange Y/yoke mark on a transparent background, defined in `src/assets/yaoc.svg`, in the header, welcome screen, and browser favicon. `scripts/generate-icons.cjs` renders that vector with Sharp into the PNGs and multi-resolution ICO in `src-tauri/icons`. Tauri embeds those assets for the executable, window/taskbar, and system tray (via `default_window_icon`). The OpenClaw lobster is not used as the client icon.
 
 ### Reliability and publication tooling
 

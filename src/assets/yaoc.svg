@@ -1,4 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64">
-  <rect x="1" y="1" width="62" height="62" rx="15" fill="#111827" stroke="#334155" stroke-width="1.5"/>
-  <path d="M16 19v9c0 8.84 7.16 16 16 16s16-7.16 16-16v-9M32 44v8" fill="none" stroke="#fb923c" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <defs>
+    <linearGradient id="orange" x1="32" y1="12" x2="32" y2="53" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff951d"/>
+      <stop offset="1" stop-color="#ff8916"/>
+    </linearGradient>
+  </defs>
+  <path d="M14.3 13.7C12 12 8.6 12.4 6.9 14.7S5.7 20.3 8 22l14.1 10.1C25.3 34.4 27 37.6 27 41.5V47c0 3 2.2 5.3 5 5.3s5-2.3 5-5.3v-5.5c0-3.9 1.7-7.1 4.9-9.4L56 22c2.3-1.7 2.8-5 1.1-7.3S52 12 49.7 13.7L34.8 24.9c-1.7 1.3-3.9 1.3-5.6 0Z" fill="url(#orange)"/>
 </svg>
