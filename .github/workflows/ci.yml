@@ -40,10 +40,11 @@ jobs:
       - run: npm test
       - run: npm run format:check
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Build Beta executables and embedded frontend
+        run: npm run dist:all
       - run: cargo test --locked --release --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnullvm
       - run: cargo test --locked --release --manifest-path src-tauri/Cargo.toml --package webview2-com-sys --lib --target x86_64-pc-windows-gnullvm
       - run: cargo clippy --locked --release --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnullvm -- -D warnings
-      - run: npm run dist:all
       - run: npm exec playwright install chromium
       - run: npm run test:browser
       - run: npm run notices

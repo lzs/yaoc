@@ -43,9 +43,12 @@ npm.cmd run check
 npm.cmd test
 npm.cmd run format:check
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+npm.cmd run dist:all
 cargo test --locked --release --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnullvm
 cargo clippy --locked --release --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnullvm -- -D warnings
 ```
+
+Build before running Rust tests or Clippy on a fresh checkout: Tauri embeds `dist/` at compile time, and direct Cargo commands do not run the frontend build hook. CI builds both Beta executables before those checks.
 
 Browser smoke tests run against compiled assets with an isolated mocked Gateway; they do not read profiles or connect to a real Gateway:
 
