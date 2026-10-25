@@ -2,6 +2,7 @@
 
 mod efficiency;
 mod storage;
+mod window_state;
 
 use storage::atomic_write;
 
@@ -1664,12 +1665,22 @@ fn main() {
     log_boot("GatewayState initialized");
     tauri::Builder::default()
         .manage(gw_state)
+        .manage(window_state::WindowState::default())
         .on_window_event(|window, event| {
             if window.label() != "main" {
                 return;
             }
+            if matches!(
+                event,
+                tauri::WindowEvent::Moved(_)
+                    | tauri::WindowEvent::Resized(_)
+                    | tauri::WindowEvent::Focused(_)
+            ) {
+                window_state::track(window);
+            }
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    window_state::save(window.app_handle());
                     if TRAY_HANDLES.get().is_none() {
                         return;
                     }
@@ -1693,6 +1704,9 @@ fn main() {
             spawn_global_hotkey_listener(app.handle().clone(), initial_hotkey);
 
             if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = window_state::restore(&window.as_ref().window()) {
+                    log_boot(&format!("Could not restore window state: {error}"));
+                }
                 if let Some(icon) = app.default_window_icon().cloned() {
                     let _ = window.set_icon(icon);
                 }
@@ -1715,8 +1729,13 @@ fn main() {
             set_global_hotkey,
             quit_app
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                window_state::save(app);
+            }
+        });
 }
 
 fn show_startup_error(message: &str) {

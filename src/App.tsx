@@ -2962,15 +2962,20 @@ export default function App() {
                 const isMarkdownDetected = Boolean(m.content && hasMarkdownSyntax(m.content));
                 const showRaw = rawMessageIds.has(m.id);
                 return (
-                  <div key={m.id} className={`message-card ${m.role}`}>
+                  <div
+                    key={m.id}
+                    className={`message-card ${m.role}`}
+                    role="article"
+                    aria-label={
+                      m.role === 'user'
+                        ? 'You'
+                        : m.role === 'assistant'
+                          ? `OpenClaw (${selectedAgentId})`
+                          : 'System'
+                    }
+                  >
                     <div className="message-header">
-                      <span style={{ fontWeight: 500, textTransform: 'uppercase' }}>
-                        {m.role === 'user'
-                          ? 'You'
-                          : m.role === 'assistant'
-                            ? `OpenClaw (${selectedAgentId})`
-                            : 'System'}
-                      </span>
+                      {m.role === 'system' && <span className="message-sender">System</span>}
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                         {isMarkdownDetected && (
                           <button

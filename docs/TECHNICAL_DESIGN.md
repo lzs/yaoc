@@ -99,6 +99,12 @@ yaoc/
    - Each `GatewayProfile` in `profiles` stores `id`, `name`, `endpoint`, `token`, `password`, **`deviceToken`** (cached per profile when issued by the Gateway in `hello-ok`), `clientId`, `clientMode`, `role`, `allowInsecureTls`, and `includeDeviceIdentity`.
    - `uiState` (`UiSessionState`) persists `autoConnect`, `selectedAgentId`, `selectedSessionKey`, `showWorkspacePane`, `currentDir`, `activeFileName`, `showHiddenFiles`, `sidebarWidth`, `workspaceWidth`, and `workspaceTreeWidth` (also mirrored to `localStorage` under `openclaw.uiState.v1` for instant synchronous hydration, with disk writes debounced by 300 ms and written atomically via a `.tmp` file rename).
 
+3. **`window-state.json` (`src-tauri/src/window_state.rs`):**
+   - Stores the normal window position, client size, frame dimensions, display scale, and maximized state separately from frontend settings.
+   - Move/resize/focus events update an in-memory snapshot; closing to the tray and exiting save it atomically. Minimizing preserves the previous normal bounds and maximized state.
+   - Startup restores placement before showing the window. The saved bounds are fitted to an available monitor's work area, using the primary monitor if the saved display was disconnected and adjusting size for DPI changes. The existing minimum window size still applies.
+   - Hidden/minimized state is never restored. Missing or invalid saved geometry falls back to the configured default window, with restore failures recorded in diagnostics.
+
 ### 3.2 OpenClaw Gateway WebSocket Protocol & Handshake
 
 1. **Endpoint Normalization (`normalize_gateway_url`):**
