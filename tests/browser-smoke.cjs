@@ -64,6 +64,7 @@ async function openApp(browser, options = {}) {
     window.testRequests = [];
     window.testSaves = [];
     window.testHotkeys = [];
+    window.testSessionRows = options.sessionRows;
     window.openclawApi = {
       getSystemInfo: async () => ({ platform: 'win32', arch: 'x64', runtime: 'test' }),
       loadProfiles: async () => {
@@ -108,27 +109,29 @@ async function openApp(browser, options = {}) {
         if (method === 'agents.list') return { agents: [{ id: 'main', name: 'Assistant' }] };
         if (method === 'sessions.list')
           return {
-            sessions: options.sessionAliases
-              ? [
-                  { key: 'test-2', agentId: 'main', label: 'Friendly test' },
-                  {
-                    key: 'agent:main:test-2',
-                    agentId: 'main',
-                    model: 'model-a',
-                    modelProvider: 'provider',
-                    thinkingLevel,
-                  },
-                ]
-              : [
-                  {
-                    key: 'main',
-                    agentId: 'main',
-                    model: model.split('/')[1],
-                    modelProvider: 'provider',
-                    thinkingLevel,
-                    ...thinkingMetadata(),
-                  },
-                ],
+            sessions:
+              window.testSessionRows ||
+              (options.sessionAliases
+                ? [
+                    { key: 'test-2', agentId: 'main', label: 'Friendly test' },
+                    {
+                      key: 'agent:main:test-2',
+                      agentId: 'main',
+                      model: 'model-a',
+                      modelProvider: 'provider',
+                      thinkingLevel,
+                    },
+                  ]
+                : [
+                    {
+                      key: 'main',
+                      agentId: 'main',
+                      model: model.split('/')[1],
+                      modelProvider: 'provider',
+                      thinkingLevel,
+                      ...thinkingMetadata(),
+                    },
+                  ]),
           };
         if (method === 'models.list')
           return {
@@ -140,6 +143,9 @@ async function openApp(browser, options = {}) {
             })),
           };
         if (method === 'sessions.patch') {
+          if ('label' in params && options.rejectSessionLabel) {
+            return { ok: false, error: { message: 'Label denied by fixture' } };
+          }
           if ('model' in params) model = params.model;
           if ('thinkingLevel' in params) {
             if (options.rejectThinking) throw new Error('Reasoning denied by fixture');
@@ -394,6 +400,126 @@ async function openApp(browser, options = {}) {
       )
     );
     await aliases.close();
+    const mixed = await openApp(browser);
+    await mixed.locator('.message-body').waitFor();
+    await mixed.getByTitle('New Session', { exact: true }).click();
+    await mixed.getByPlaceholder('Session key (e.g. feature-x)').fill('SoCLaaS');
+    await mixed.getByPlaceholder('Session key (e.g. feature-x)').press('Enter');
+    await mixed.waitForFunction(() =>
+      window.testRequests.some(
+        (r) =>
+          r.method === 'sessions.patch' &&
+          r.params.key === 'agent:main:soclaas' &&
+          r.params.label === 'SoCLaaS'
+      )
+    );
+    const savedLabel = await mixed.evaluate(
+      () =>
+        window.testRequests.find(
+          (r) => r.method === 'sessions.patch' && r.params.key === 'agent:main:soclaas'
+        ).params
+    );
+    const mixedComposer = mixed.getByRole('textbox', { name: 'Message Assistant', exact: true });
+    await mixedComposer.fill('Hello from SoCLaaS');
+    await mixedComposer.press('Enter');
+    await mixed.waitForFunction(() =>
+      window.testRequests.some(
+        (r) => r.method === 'chat.send' && r.params.sessionKey === 'agent:main:soclaas'
+      )
+    );
+    await mixed.evaluate(() =>
+      window.testEmitGatewayEvent({
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:main:soclaas',
+          runId: 'test-run',
+          state: 'delta',
+          delta: 'Mixed-case immediate reply',
+        },
+      })
+    );
+    await mixed
+      .locator('.message-body')
+      .filter({ hasText: 'Mixed-case immediate reply' })
+      .waitFor();
+    assert.equal(
+      await mixed.locator('.session-item').count(),
+      2,
+      'Lowercase events do not create a second mixed-case session'
+    );
+    assert.equal(await mixed.locator('.session-item.active .session-key').textContent(), 'SoCLaaS');
+    assert.equal(await mixed.locator('.session-status-spinner').count(), 1);
+    await mixed.evaluate(() =>
+      window.testEmitGatewayEvent({
+        event: 'chat',
+        payload: {
+          sessionKey: 'agent:main:soclaas',
+          runId: 'test-run',
+          state: 'final',
+          message: { content: 'Mixed-case immediate reply' },
+        },
+      })
+    );
+    await mixed.getByRole('button', { name: 'Send message', exact: true }).waitFor();
+    assert.equal(await mixed.locator('.session-status-spinner').count(), 0);
+    await mixed.evaluate(() => {
+      window.testSessionRows = [{ key: 'agent:main:soclaas', agentId: 'main' }];
+    });
+    await mixed.getByTitle('Refresh Sessions from Gateway', { exact: true }).click();
+    await mixed.waitForFunction(() => document.querySelectorAll('.session-item').length === 1);
+    assert.equal(
+      await mixed.locator('.session-item.active .session-key').textContent(),
+      'SoCLaaS',
+      'List refresh retains the typed label'
+    );
+    await mixed.close();
+    // A fresh app has no local label cache; recover only Gateway-owned metadata.
+    const restarted = await openApp(browser, { sessionRows: [savedLabel] });
+    await restarted.locator('.message-body').waitFor();
+    assert.equal(
+      await restarted.locator('.session-item.active .session-key').textContent(),
+      'SoCLaaS',
+      'Capitalization survives restart through the Gateway label'
+    );
+    await restarted.close();
+    const labelRejected = await openApp(browser, { rejectSessionLabel: true });
+    await labelRejected.locator('.message-body').waitFor();
+    const labelWarning = new Promise((resolve) =>
+      labelRejected.once('dialog', async (dialog) => {
+        assert.match(
+          dialog.message(),
+          /name could not be saved to OpenClaw: Label denied by fixture/
+        );
+        await dialog.accept();
+        resolve();
+      })
+    );
+    await labelRejected.getByTitle('New Session', { exact: true }).click();
+    await labelRejected.getByPlaceholder('Session key (e.g. feature-x)').fill('Unsaved Name');
+    await labelRejected.getByPlaceholder('Session key (e.g. feature-x)').press('Enter');
+    await labelWarning;
+    assert.equal(
+      await labelRejected.locator('.session-item.active .session-key').textContent(),
+      'Unsaved Name'
+    );
+    await labelRejected.close();
+    const caseAliases = await openApp(browser, {
+      sessionRows: [
+        { key: 'agent:main:SoCLaaS', label: 'SoCLaaS' },
+        { key: 'agent:main:soclaas', model: 'model-a', modelProvider: 'provider' },
+      ],
+    });
+    await caseAliases.locator('.message-body').waitFor();
+    assert.equal(
+      await caseAliases.locator('.session-item').count(),
+      1,
+      'Existing mixed-case list aliases collapse'
+    );
+    assert.equal(
+      await caseAliases.locator('.session-item.active .session-key').textContent(),
+      'SoCLaaS'
+    );
+    await caseAliases.close();
     const legacy = await openApp(browser, { legacyThinking: true });
     await legacy.locator('.message-body').waitFor();
     await legacy.getByRole('button', { name: 'Reasoning effort', exact: true }).click();

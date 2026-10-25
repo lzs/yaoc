@@ -13,9 +13,35 @@ export function modelRef(model?: string, provider?: string): string {
   return id && provider && !id.startsWith(`${provider}/`) ? `${provider}/${id}` : id;
 }
 
+// Gateway names are case-insensitive, except provider-owned Signal group IDs
+// and Matrix room/event IDs. Keep those opaque bytes intact while folding names.
+function normalizeSessionKeyCase(key: string): string {
+  const spans: { start: number; end: number }[] = [];
+  const matrix = /^(?:(?:agent:[^:]*:)+:*)?matrix:(?:channel|group):/i.exec(key);
+  if (matrix) {
+    const start = matrix[0].length;
+    const thread = key.toLowerCase().lastIndexOf(':thread:');
+    if (thread >= start) {
+      spans.push({ start, end: thread }, { start: thread + ':thread:'.length, end: key.length });
+    } else spans.push({ start, end: key.length });
+  }
+  for (const match of key.matchAll(/(^|:)signal:group:([^:]+)/gi)) {
+    const end = match.index + match[0].length;
+    spans.push({ start: end - match[2].length, end });
+  }
+  let normalized = '';
+  let cursor = 0;
+  for (const span of spans.sort((a, b) => a.start - b.start)) {
+    if (span.start < cursor) continue;
+    normalized += key.slice(cursor, span.start).toLowerCase() + key.slice(span.start, span.end);
+    cursor = span.end;
+  }
+  return normalized + key.slice(cursor).toLowerCase();
+}
+
 export function toGatewaySessionKey(agentId: string, sessionKey: string): string {
-  const cleanAgent = agentId?.trim() || 'main';
-  const cleanKey = sessionKey?.trim() || 'main';
+  const cleanAgent = agentId?.trim().toLowerCase() || 'main';
+  const cleanKey = normalizeSessionKeyCase(sessionKey?.trim() || 'main');
   // The main agent uses qualified store/event keys too. Keep unscoped sentinels intact.
   return cleanKey.startsWith('agent:') || cleanKey === 'global' || cleanKey === 'unknown'
     ? cleanKey
@@ -23,17 +49,18 @@ export function toGatewaySessionKey(agentId: string, sessionKey: string): string
 }
 
 export function sessionAgentId(key: string, fallback = 'main'): string {
-  return /^agent:([^:]+):/.exec(key)?.[1] || fallback;
+  return /^agent:([^:]+):/i.exec(key.trim())?.[1].toLowerCase() || fallback.trim().toLowerCase();
 }
 
-// Collapse short and qualified aliases, preferring Gateway metadata and human labels.
+// Collapse short, qualified, and case aliases, preferring Gateway metadata and human labels.
 export function normalizeSessions(rows: SessionInfo[], fallbackAgent: string): SessionInfo[] {
   const sessions = new Map<string, { row: SessionInfo; qualified: boolean }>();
   const meaningfulLabel = (row: SessionInfo) =>
     typeof row.label === 'string' &&
     row.label.trim() &&
     row.label !== row.key &&
-    row.label !== toGatewaySessionKey(row.agentId, row.key);
+    row.label !== toGatewaySessionKey(row.agentId, row.key) &&
+    row.label !== toGatewaySessionKey(row.agentId, row.key).replace(/^agent:[^:]+:/, '');
   for (const row of rows) {
     if (!row || typeof row.key !== 'string' || !row.key.trim()) continue;
     const agentId = sessionAgentId(row.key, row.agentId || fallbackAgent);

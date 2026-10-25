@@ -435,6 +435,7 @@ export default function App() {
   const [renamingSessionKey, setRenamingSessionKey] = useState<string | null>(null);
   const [renameSessionInput, setRenameSessionInput] = useState<string>('');
   const [refreshingSessions, setRefreshingSessions] = useState<boolean>(false);
+  const localSessionLabelsRef = useRef(new Map<string, string>());
 
   // Chat State
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1216,7 +1217,15 @@ export default function App() {
         ...session,
         ...sessionThinkingMetadata(session, sessRes.defaults),
       }));
-      setSessions(withThinking);
+      setSessions(
+        withThinking.map((session) => ({
+          ...session,
+          // A list refresh may omit labels for locally created sessions.
+          label:
+            session.label ??
+            localSessionLabelsRef.current.get(`${activeProfileIdRef.current}:${session.key}`),
+        }))
+      );
 
       const preferredKey = toGatewaySessionKey(currentAgent, preferredSessionKey);
       const resolvedKey =
@@ -2075,6 +2084,7 @@ export default function App() {
   async function handleRenameSession(targetKey: string, newLabel: string) {
     const trimmed = newLabel.trim();
     const gatewayKey = toGatewaySessionKey(selectedAgentId, targetKey);
+    localSessionLabelsRef.current.set(`${activeProfileId}:${gatewayKey}`, trimmed);
     setSessions((prev) =>
       prev.map((s) =>
         s.key === targetKey || s.key === gatewayKey ? { ...s, label: trimmed || null } : s
@@ -2118,10 +2128,11 @@ export default function App() {
     if (connStatus.state === 'connected') loadChatHistory(gatewayKey);
   }
 
-  function handleCreateSession() {
+  async function handleCreateSession() {
     const cleaned = newSessionKeyInput.trim();
     if (!cleaned) return;
     const gatewayKey = toGatewaySessionKey(selectedAgentId, cleaned);
+    const label = cleaned.replace(/^agent:[^:]+:/i, '');
     const existing = sessions.find(
       (session) =>
         toGatewaySessionKey(session.agentId || selectedAgentId, session.key) === gatewayKey
@@ -2132,6 +2143,7 @@ export default function App() {
       handleSelectSession(existing.key);
       return;
     }
+    localSessionLabelsRef.current.set(`${activeProfileId}:${gatewayKey}`, label);
     saveCurrentSessionScrollPosition();
     setSessions((prev) =>
       normalizeSessions(
@@ -2139,7 +2151,7 @@ export default function App() {
           {
             key: gatewayKey,
             agentId: selectedAgentId,
-            label: cleaned.replace(/^agent:[^:]+:/, ''),
+            label,
             updatedAt: Date.now(),
           },
           ...prev,
@@ -2156,6 +2168,21 @@ export default function App() {
     uiStateRef.current = { ...uiStateRef.current, selectedSessionKey: gatewayKey };
     setSelectedSessionKey(gatewayKey);
     setMessages([]);
+    if (connStatus.state === 'connected' && window.openclawApi) {
+      try {
+        const result = await window.openclawApi.request('sessions.patch', {
+          key: gatewayKey,
+          label,
+        });
+        if (result?.ok === false) {
+          throw new Error(result.error?.message || 'The Gateway rejected the session name.');
+        }
+      } catch (error: any) {
+        alert(
+          `The session is available locally, but its name could not be saved to OpenClaw: ${error?.message || 'RPC error'}. Use Rename to retry.`
+        );
+      }
+    }
   }
 
   function updateActiveProfileField<K extends keyof GatewayProfile>(

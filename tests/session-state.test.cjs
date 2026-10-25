@@ -272,6 +272,51 @@ function event(sessionKey, state, extra = {}) {
     view.messages.some((message) => message.content.includes('Other agent')),
     false
   );
+  view.setNewSessionKeyInput('SoCLaaS');
+  render();
+  view.handleCreateSession();
+  render();
+  assert.equal(view.selectedSessionKey, 'agent:main:soclaas');
+  const savedLabel = requests.findLast((request) => request.method === 'sessions.patch');
+  assert.equal(savedLabel.params.key, 'agent:main:soclaas');
+  assert.equal(
+    savedLabel.params.label,
+    'SoCLaaS',
+    'New session label is sent to the Gateway with its original case'
+  );
+  assert.equal(
+    view.sessions.find((session) => session.key === 'agent:main:soclaas').label,
+    'SoCLaaS'
+  );
+  view.setComposerText('Mixed-case session');
+  render();
+  await view.handleSendMessage();
+  render();
+  assert.equal(
+    requests.findLast((request) => request.method === 'chat.send').params.sessionKey,
+    'agent:main:soclaas'
+  );
+  event('agent:main:soclaas', 'delta', { delta: 'Lowercase Gateway reply' });
+  assert(view.messages.some((message) => message.content === 'Lowercase Gateway reply'));
+  assert.equal(
+    view.sessions.filter((session) => key(session.key) === 'agent:main:soclaas').length,
+    1
+  );
+  event('agent:main:soclaas', 'final', { message: { content: 'Lowercase Gateway reply' } });
+  assert.equal(view.isStreaming, false);
+  view.setComposerText('Case-independent draft');
+  render();
+  view.handleSelectSession('agent:main:SoCLaaS');
+  render();
+  assert.equal(view.composerText, 'Case-independent draft');
+  view.setNewSessionKeyInput('SOCLAAS');
+  render();
+  view.handleCreateSession();
+  render();
+  assert.equal(
+    view.sessions.filter((session) => key(session.key) === 'agent:main:soclaas').length,
+    1
+  );
   view.setSelectedAgentId('research');
   render();
   view.setNewSessionKeyInput('test-2');

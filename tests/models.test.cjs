@@ -221,3 +221,64 @@ test('canonical model metadata requests still accept legacy short-key session re
   );
   assert.equal(result.thinkingLevels[1].id, 'low');
 });
+
+test('mixed-case named sessions share the Gateway identity, including qualified saved keys', () => {
+  for (const input of ['SoCLaaS', 'soclaas', 'agent:main:SoCLaaS', ' Agent:MAIN:soclaas ']) {
+    assert.equal(exportsObject.toGatewaySessionKey('main', input), 'agent:main:soclaas');
+  }
+  assert.equal(exportsObject.toGatewaySessionKey('Research', 'SoCLaaS'), 'agent:research:soclaas');
+  assert.equal(exportsObject.sessionAgentId('Agent:Research:SoCLaaS'), 'research');
+  assert.equal(exportsObject.toGatewaySessionKey('main', 'GLOBAL'), 'global');
+});
+
+test('case aliases merge in either order while retaining typed labels and canonical metadata', () => {
+  const local = { key: 'agent:main:SoCLaaS', agentId: 'main', label: 'SoCLaaS' };
+  const canonical = { key: 'agent:main:soclaas', label: 'soclaas', model: 'live-model' };
+  for (const rows of [
+    [local, canonical],
+    [canonical, local],
+  ]) {
+    const sessions = exportsObject.normalizeSessions(rows, 'main');
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].key, 'agent:main:soclaas');
+    assert.equal(sessions[0].label, 'SoCLaaS');
+    assert.equal(sessions[0].model, 'live-model');
+  }
+  assert.equal(
+    exportsObject.normalizeSessions(
+      [local, { ...canonical, key: 'agent:research:soclaas' }],
+      'main'
+    ).length,
+    2,
+    'The same name under another agent is a separate session'
+  );
+});
+
+test('case-sensitive external peer IDs are preserved rather than merged by name folding', () => {
+  for (const input of [
+    'agent:main:signal:group:AbC123:thread:Topic',
+    'agent:main:matrix:group:!AbC:Server:thread:$Event',
+    'agent:main:matrix:channel:!signal:group:AbC:Server',
+  ]) {
+    const normalized = exportsObject.toGatewaySessionKey('main', input);
+    assert.equal(exportsObject.toGatewaySessionKey('main', normalized), normalized);
+    assert.notEqual(normalized, exportsObject.toGatewaySessionKey('main', input.toLowerCase()));
+  }
+  assert.equal(
+    exportsObject.toGatewaySessionKey('main', 'Agent:MAIN:Signal:GROUP:AbC123:THREAD:Topic'),
+    'agent:main:signal:group:AbC123:thread:topic'
+  );
+  assert.equal(
+    exportsObject.toGatewaySessionKey('main', 'Agent:MAIN:Matrix:GROUP:!AbC:Server:THREAD:$Event'),
+    'agent:main:matrix:group:!AbC:Server:thread:$Event'
+  );
+});
+
+test('session capability lookup matches mixed-case persisted selections', async () => {
+  const result = await exportsObject.loadSessionThinking(
+    async () => ({ sessions: [{ key: 'agent:main:soclaas', thinkingOptions: ['off', 'high'] }] }),
+    'main',
+    'agent:main:SoCLaaS'
+  );
+  assert.equal(result.thinkingLevels[1].id, 'high');
+});
