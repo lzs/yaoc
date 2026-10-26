@@ -74,7 +74,7 @@ const source = fs
 const renderStart = source.indexOf('\n  return (', source.indexOf('export default function App()'));
 const testSource =
   source.slice(0, renderStart) +
-  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId }; }`;
+  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint }; }`;
 const exportsObject = {};
 vm.runInNewContext(compile(testSource), {
   exports: exportsObject,
@@ -404,6 +404,140 @@ function event(sessionKey, state, extra = {}) {
   console.log(
     'PASS: Ctrl+Page Up/Down order, wraparound, drafts, modifiers, modal guards, and empty/single session lists'
   );
+
+  // Security regressions: pairing requestId sanitization, image URL filtering, ws:// warning, and profile-scoped deviceToken
+  assert.equal(view.sanitizePairingRequestId('req-123_abc.456:789'), 'req-123_abc.456:789');
+  assert.equal(view.sanitizePairingRequestId('x & calc.exe\r\n'), null);
+  assert.equal(view.sanitizePairingRequestId('$(whoami)'), null);
+  assert.equal(view.sanitizeDeviceId('0123456789abcdefABCDEF'), '0123456789abcdefABCDEF');
+  assert.equal(view.sanitizeDeviceId('device-id; rm -rf /'), null);
+
+  assert.equal(
+    view.sanitizeImagePreviewUrl('data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='),
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
+  );
+  assert.equal(
+    view.sanitizeImagePreviewUrl('data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='),
+    undefined,
+    'SVG data URLs must not produce image previews'
+  );
+  assert.equal(
+    view.sanitizeImagePreviewUrl('', 'image/svg+xml', 'PHN2Zz48L3N2Zz4='),
+    undefined,
+    'SVG base64 content must not produce image previews'
+  );
+  assert.equal(view.sanitizeImagePreviewUrl('https://evil.example/pixel.png'), undefined);
+  assert.equal(view.sanitizeImagePreviewUrl('http://169.254.169.254/latest/meta-data/'), undefined);
+  assert.equal(view.sanitizeImagePreviewUrl('javascript:alert(1)'), undefined);
+  const extractedRemote = view.extractMessageAttachments({
+    attachments: [
+      {
+        type: 'image',
+        fileName: 'beacon.png',
+        mimeType: 'image/png',
+        url: 'https://evil.example/beacon.png',
+      },
+    ],
+  });
+  assert.equal(extractedRemote.length, 1);
+  assert.equal(extractedRemote[0].dataUrl, undefined);
+
+  assert.equal(view.isUnencryptedRemoteGatewayEndpoint('ws://127.0.0.1:18789'), false);
+  assert.equal(view.isUnencryptedRemoteGatewayEndpoint('ws://localhost:18789'), false);
+  assert.equal(view.isUnencryptedRemoteGatewayEndpoint('ws://[::1]:18789'), false);
+  assert.equal(view.isUnencryptedRemoteGatewayEndpoint('wss://gateway.example.com'), false);
+  assert.equal(view.isUnencryptedRemoteGatewayEndpoint('ws://gateway.example.com:18789'), true);
+  assert.equal(view.isUnencryptedRemoteGatewayEndpoint('http://localhost.evil.com:18789'), true);
+
+  view.setProfiles([
+    {
+      id: 'p1',
+      name: 'Operator 1',
+      endpoint: 'ws://127.0.0.1:18789',
+      token: '',
+      password: '',
+      deviceToken: 'tok-p1-initial',
+      allowInsecureTls: false,
+      includeDeviceIdentity: true,
+    },
+    {
+      id: 'p2',
+      name: 'Operator 2',
+      endpoint: 'ws://127.0.0.1:18789',
+      token: '',
+      password: '',
+      deviceToken: 'tok-p2-initial',
+      allowInsecureTls: false,
+      includeDeviceIdentity: true,
+    },
+  ]);
+  view.setActiveProfileId('p2');
+  render();
+  statusListener({
+    state: 'connected',
+    profileId: 'p2',
+    hello: { auth: { deviceToken: 'tok-p2-updated' } },
+  });
+  render();
+  assert.equal(
+    view.profiles.find((p) => p.id === 'p1').deviceToken,
+    'tok-p1-initial',
+    'Sibling profile sharing the same endpoint must not have its deviceToken overwritten'
+  );
+  assert.equal(view.profiles.find((p) => p.id === 'p2').deviceToken, 'tok-p2-updated');
+  console.log(
+    'PASS: security regressions (pairing requestId validation, remote image preview blocking, unencrypted remote endpoint detection, and profile-scoped deviceToken updates)'
+  );
+
+  // Live session sync: test sessions.changed event from Web Control UI / external clients
+  view.setSessions([
+    { key: 'main', agentId: 'main', label: 'Primary Session', thinkingLevel: 'low', model: 'sonnet' },
+    { key: 'other', agentId: 'main', label: 'Other Session', thinkingLevel: 'off' },
+  ]);
+  render();
+  assert.equal(view.sessions.find((s) => s.key === 'main').thinkingLevel, 'low');
+
+  // External client patches thinkingLevel to "xhigh"
+  listener({
+    event: 'sessions.changed',
+    payload: {
+      reason: 'patch',
+      session: {
+        key: 'main',
+        agentId: 'main',
+        thinkingLevel: 'xhigh',
+        model: 'opus',
+        modelProvider: 'anthropic',
+      },
+    },
+  });
+  render();
+  const patchedSession = view.sessions.find((s) => s.key === 'main');
+  assert.equal(patchedSession.thinkingLevel, 'xhigh', 'External thinkingLevel change must update YAOC session');
+  assert.equal(patchedSession.model, 'opus', 'External model change must update YAOC session');
+
+  // External client resets thinkingLevel to Default (null)
+  listener({
+    event: 'sessions.changed',
+    payload: {
+      reason: 'patch',
+      session: {
+        key: 'main',
+        agentId: 'main',
+        thinkingLevel: null,
+      },
+    },
+  });
+  render();
+  assert.equal(
+    view.sessions.find((s) => s.key === 'main').thinkingLevel,
+    undefined,
+    'External clearing of thinkingLevel must revert to undefined in YAOC session'
+  );
+  console.log(
+    'PASS: live session synchronization (sessions.changed updates thinkingLevel and model in real-time)'
+  );
+
   console.log(
     'PASS: session isolation, drafts/attachments, background completion, abort IDs, lifecycle, timeout, delayed failure routing and connection loss'
   );

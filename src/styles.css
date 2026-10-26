@@ -1770,10 +1770,14 @@ textarea {
   border-left-color: var(--accent);
 }
 
-.settings-tab:focus-visible,
+.settings-tab:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
 .settings-trigger:focus-visible {
   outline: 2px solid var(--border-focus);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
 .settings-panel {
@@ -1827,6 +1831,10 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.modal-card:focus {
+  outline: none;
 }
 
 .form-row {

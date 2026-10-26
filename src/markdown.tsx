@@ -97,13 +97,23 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
     if (part.startsWith('[')) {
       const match = part.match(/^\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:)[^\s)]+)\)$/);
       if (match) {
+        const href = match[2];
+        const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+          if (window.openclawApi?.openExternalUrl) {
+            e.preventDefault();
+            window.openclawApi.openExternalUrl(href).catch((err) => {
+              console.error('Failed to open external URL:', err);
+            });
+          }
+        };
         return (
           <a
             key={key}
-            href={match[2]}
+            href={href}
             target="_blank"
             rel="noopener noreferrer"
             className="md-link"
+            onClick={handleLinkClick}
           >
             {match[1]}
           </a>

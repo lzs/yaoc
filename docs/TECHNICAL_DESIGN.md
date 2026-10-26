@@ -77,14 +77,14 @@ yaoc/
 
 ### 3.1 Local Persistence (`%APPDATA%\openclaw-chat\`)
 
-`get_storage_dir()` resolves to `%APPDATA%\openclaw-chat` (or `%TEMP%\openclaw-chat` if `APPDATA` is unset):
+`get_storage_dir()` resolves to `%APPDATA%\openclaw-chat` (falling back to Win32 `SHGetKnownFolderPath(FOLDERID_RoamingAppData)`, `%LOCALAPPDATA%`, or `%USERPROFILE%\AppData\Roaming` if `APPDATA` is unset, and never to a shared system temporary directory):
 
 1. **`device-identity.json` (`DeviceIdentity`):**
    - Generated once on first run using `ed25519_dalek::SigningKey::generate(&mut OsRng)`.
    - Fields:
      - `deviceId`: Hex-encoded SHA-256 digest of the raw 32-byte Ed25519 public key (`sha2::Sha256`).
      - `publicKeyBase64Url`: Raw 32-byte Ed25519 public key encoded with `URL_SAFE_NO_PAD`.
-     - `privateKeyPem`: PKCS#8 PEM-encoded private key.
+     - `privateKeyPem`: PKCS#8 PEM-encoded private key (encrypted at rest on disk with Windows DPAPI `CryptProtectData` under a `dpapi:` prefix; legacy plaintext files are automatically migrated on load).
      - `publicKeyPem`: SPKI PEM-encoded public key.
 2. **`gateway-profiles.json`:**
    - Read by `load_profiles` and written by `save_profiles`.
@@ -96,7 +96,7 @@ yaoc/
        "uiState": { ... }
      }
      ```
-   - Each `GatewayProfile` in `profiles` stores `id`, `name`, `endpoint`, `token`, `password`, **`deviceToken`** (cached per profile when issued by the Gateway in `hello-ok`), `clientId`, `clientMode`, `role`, `allowInsecureTls`, and `includeDeviceIdentity`.
+   - Each `GatewayProfile` in `profiles` stores `id`, `name`, `endpoint`, `token`, `password`, **`deviceToken`** (cached per profile when issued by the Gateway in `hello-ok`), `clientId`, `clientMode`, `role`, `allowInsecureTls`, and `includeDeviceIdentity`. Non-empty `token`, `password`, and `deviceToken` fields are encrypted at rest on disk with Windows DPAPI (`dpapi:` prefix) and transparently decrypted on load.
    - `uiState` (`UiSessionState`) persists `autoConnect`, `selectedAgentId`, `selectedSessionKey`, `showWorkspacePane`, `currentDir`, `activeFileName`, `showHiddenFiles`, `sidebarWidth`, `workspaceWidth`, and `workspaceTreeWidth` (also mirrored to `localStorage` under `openclaw.uiState.v1` for instant synchronous hydration, with disk writes debounced by 300 ms and written atomically via a `.tmp` file rename).
 
 3. **`window-state.json` (`src-tauri/src/window_state.rs`):**
@@ -109,8 +109,8 @@ yaoc/
 
 1. **Endpoint Normalization (`normalize_gateway_url`):**
    - Empty input defaults to `"ws://127.0.0.1:18789"`.
-   - Converts `http://...` $\rightarrow$ `ws://...` and `https://...` $\rightarrow$ `wss://...`.
-   - Bare `127.0.0.1...` or `localhost...` prefixes get `ws://`; other bare hostnames get `wss://`.
+   - Converts `http://...` $\rightarrow$ `ws://...` and `https://...` $\rightarrow$ `wss://...` (case-insensitively).
+   - Bare loopback hosts (`127.0.0.1`, `localhost`, or `[::1]` verified via URL host parsing with no userinfo) get `ws://`; all other bare hostnames (including lookalikes such as `localhost.evil.com` or `127.0.0.1.evil.com`) get `wss://`.
    - Synthesizes a matching `Origin` HTTP header (`http://host:port` for `ws://` or `https://host:port` for `wss://`) on the WebSocket upgrade request.
    - Configures WebSocket frame limits to `max_message_size: 64 MB` and `max_frame_size: 32 MB` to support large base64 attachments.
 2. **Challenge-Response Handshake (`connect.challenge` $\rightarrow$ `connect`):**
@@ -212,7 +212,8 @@ See [Windows efficiency mode](https://devblogs.microsoft.com/performance-diagnos
 - `agents.list` `{}` $\rightarrow$ Lists available agents (`id`, `name`, `workspace`).
 - `models.list` `{ agentId, sessionKey, view: "configured" }` (falls back to `{}` on older Gateways) $\rightarrow$ Lists available models (`id`, `provider`, `name`, `available`, `selectable`, and optional `thinkingLevels`/`thinkingDefault`) for [`SessionModelSwitcher.tsx`](../src/SessionModelSwitcher.tsx).
 - `sessions.list` `{ agentId, limit: 100, includeDerivedTitles: true }` (falls back to `{ agentId, limit: 100 }`) $\rightarrow$ Lists sessions for the active agent (`key`, `sessionId`, `label`, `displayName`, `derivedTitle`, `model`, `modelProvider`, `thinkingLevel`, `inputTokens`, `outputTokens`, `totalTokens`, `contextTokens`, `updatedAt`).
-- `sessions.patch` `{ key, label?, model?, thinkingLevel? }` $\rightarrow$ Updates a session's display label, model override (`provider/model` or `null` for agent default), or reasoning effort (an advertised option ID, or `null` to inherit the Gateway default). Short session keys for all agents, including `main`, are normalized via `toGatewaySessionKey(agentId, sessionKey)` (`agent:${agentId}:${sessionKey}`).
+- `sessions.subscribe` `{}` $\rightarrow$ Subscribes the active connection to real-time session update broadcasts (`sessions.changed`).
+- `sessions.patch` `{ key, label?, model?, thinkingLevel? }` $\rightarrow$ Updates a session's display label, model override (`provider/model` or `null` for agent default), or reasoning effort (an advertised option ID, or `null` to inherit the Gateway default). Short session keys for all agents, including `main`, are normalized via `toGatewaySessionKey(agentId, sessionKey)` (`agent:${agentId}:${sessionKey}`). Live broadcast deltas (`sessions.changed`, `session:patch`) synchronize session model overrides and reasoning effort in real time across YAOC and external clients like the Web Control UI.
 - `sessions.reset` `{ key }` $\rightarrow$ Resets a session transcript (equivalent to `/reset`).
 - `sessions.delete` `{ key, deleteTranscript: true }` $\rightarrow$ Deletes a session and its transcript.
 
@@ -297,7 +298,7 @@ Upstream `webview2-com-sys` attempts to link against MSVC-compiled `WebView2Load
 - To keep `yaoc-x64.exe` and `yaoc-arm64.exe` **single-executable portable builds**, we vendored `webview2-com-sys` in `src-tauri/vendor/webview2-com-sys` (wired via `[patch.crates-io]` in `src-tauri/Cargo.toml`):
   1. `src-tauri/vendor/webview2-com-sys/build.rs` only links `advapi32` and skips `WebView2LoaderStatic.lib`.
   2. `src-tauri/vendor/webview2-com-sys/src/lib.rs` (`mod embedded_loader`) embeds the architecture-specific `WebView2Loader.dll` (`../x64/WebView2Loader.dll`, 162 KB; `../arm64/WebView2Loader.dll`, 152 KB; `../x86/WebView2Loader.dll`) directly into the binary via `include_bytes!`.
-  3. On first WebView2 call at runtime, `embedded_loader` writes the embedded DLL to a private per-process directory under `%LOCALAPPDATA%\yaoc\WebView2Loader`, validates the bytes under a read lock, loads it via restricted `LoadLibraryExW`, and forwards the four WebView2 loader entry points (`CompareBrowserVersions`, `CreateCoreWebView2Environment`, `CreateCoreWebView2EnvironmentWithOptions`, `GetAvailableCoreWebView2BrowserVersionString`) via `GetProcAddress`.
+  3. On first WebView2 call at runtime, `embedded_loader` writes the embedded DLL to a private per-process directory under `%LOCALAPPDATA%\yaoc\WebView2Loader`, validates the bytes while retaining a read lock for the lifetime of the process, prunes stale loader directories from exited processes, loads it via restricted `LoadLibraryExW`, and forwards the four WebView2 loader entry points (`CompareBrowserVersions`, `CreateCoreWebView2Environment`, `CreateCoreWebView2EnvironmentWithOptions`, `GetAvailableCoreWebView2BrowserVersionString`) via `GetProcAddress`.
 - **Do not remove `[patch.crates-io]`** from `src-tauri/Cargo.toml`, as it is required for single-file portability and `aarch64-pc-windows-gnullvm` compilation.
 
 ### 5.3 Build Commands
@@ -323,7 +324,7 @@ Connection epochs identify the active transport. Each connection owns its reader
 
 `src-tauri/src/storage.rs` writes through unique, synced temporary files in the destination directory and atomically renames them. Write errors reach the frontend. A damaged saved identity is reported rather than silently replaced; failed profile loads disable autosave so the original file is preserved. Diagnostics are bounded and stored alongside the user settings.
 
-The production CSP allows bundled scripts and the Tauri IPC endpoint, with inline styles for React and HTTP(S)/data/blob image previews. The development policy separately allows Vite's local HMR connection. This complements React's escaped Markdown rendering; it does not make an untrusted Gateway safe.
+The production CSP allows bundled scripts and the Tauri IPC endpoint, with inline styles for React and local `data:`/`blob:` image previews (`img-src 'self' data: blob:`). The development policy separately allows Vite's local HMR connection. This complements React's escaped Markdown rendering; it does not make an untrusted Gateway safe.
 
 Public build/test commands live in `package.json`. `scripts/package-portable.cjs` stages both lowercase binaries, rotates three backups, and writes SHA-256 checksums. `scripts/third-party-notices.cjs` gathers installed package notices. GitHub CI verifies the source and builds both Windows targets. See `SECURITY.md`, `CONTRIBUTING.md`, and `docs/BUILD.md` for operational guidance and remaining runtime validation requirements.
 

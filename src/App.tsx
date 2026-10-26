@@ -95,6 +95,69 @@ function extractMessageText(rawContent: any): string {
   return '';
 }
 
+function sanitizePairingRequestId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 128) return null;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function sanitizeDeviceId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function isUnencryptedRemoteGatewayEndpoint(rawEndpoint: string): boolean {
+  const trimmed = rawEndpoint.trim();
+  if (!trimmed || /^mock:\/\//i.test(trimmed)) return false;
+  if (!/^(ws|http):\/\//i.test(trimmed)) return false;
+  try {
+    const parsed = new URL(trimmed.replace(/^ws:\/\//i, 'http://'));
+    const host = parsed.hostname.toLowerCase();
+    return host !== 'localhost' && host !== '127.0.0.1' && host !== '[::1]' && host !== '::1';
+  } catch {
+    return true;
+  }
+}
+
+const SAFE_IMAGE_MIME_RE = /^image\/(png|jpe?g|webp|gif|bmp|avif|vnd\.microsoft\.icon|x-icon)$/i;
+const SAFE_DATA_IMAGE_URL_RE =
+  /^data:image\/(png|jpe?g|webp|gif|bmp|avif|vnd\.microsoft\.icon|x-icon);base64,[A-Za-z0-9+/=\s]+$/i;
+
+function sanitizeImagePreviewUrl(
+  rawUrl: unknown,
+  fallbackMimeType: string,
+  rawBase64?: unknown
+): string | undefined {
+  if (fallbackMimeType === 'image/svg+xml') {
+    return undefined;
+  }
+  const safeMime = SAFE_IMAGE_MIME_RE.test(fallbackMimeType) ? fallbackMimeType : 'image/png';
+  if (typeof rawBase64 === 'string' && rawBase64.trim()) {
+    const trimmed = rawBase64.trim();
+    if (SAFE_DATA_IMAGE_URL_RE.test(trimmed)) {
+      return trimmed;
+    }
+    const cleanB64 = trimmed.replace(/\s+/g, '');
+    if (/^[A-Za-z0-9+/=]+$/.test(cleanB64)) {
+      return `data:${safeMime};base64,${cleanB64}`;
+    }
+  }
+  if (typeof rawUrl === 'string' && rawUrl.trim()) {
+    const trimmed = rawUrl.trim();
+    if (
+      SAFE_DATA_IMAGE_URL_RE.test(trimmed) ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
 function extractMessageAttachments(rawMsg: any): ChatAttachmentItem[] {
   const result: ChatAttachmentItem[] = [];
   const rawContent = rawMsg?.content;
@@ -110,16 +173,13 @@ function extractMessageAttachments(rawMsg: any): ChatAttachmentItem[] {
             : typeof part.source?.data === 'string'
               ? part.source.data
               : '';
-        const url =
+        const rawUrl =
           typeof part.url === 'string'
             ? part.url
             : typeof part.image_url?.url === 'string'
               ? part.image_url.url
-              : b64
-                ? b64.startsWith('data:')
-                  ? b64
-                  : `data:${mimeType};base64,${b64}`
-                : '';
+              : '';
+        const url = sanitizeImagePreviewUrl(rawUrl, mimeType, b64);
         if (url) {
           result.push({
             id: `hist-img-${i}-${Date.now()}`,
@@ -134,15 +194,18 @@ function extractMessageAttachments(rawMsg: any): ChatAttachmentItem[] {
           });
         }
       } else if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
-        result.push({
-          id: `hist-imgurl-${i}-${Date.now()}`,
-          fileName: `image-${i + 1}.png`,
-          mimeType: 'image/png',
-          sizeBytes: 0,
-          origin: 'file',
-          isImage: true,
-          previewUrl: part.image_url.url,
-        });
+        const previewUrl = sanitizeImagePreviewUrl(part.image_url.url, 'image/png');
+        if (previewUrl) {
+          result.push({
+            id: `hist-imgurl-${i}-${Date.now()}`,
+            fileName: `image-${i + 1}.png`,
+            mimeType: 'image/png',
+            sizeBytes: 0,
+            origin: 'file',
+            isImage: true,
+            previewUrl,
+          });
+        }
       }
     });
   }
@@ -156,23 +219,15 @@ function extractMessageAttachments(rawMsg: any): ChatAttachmentItem[] {
   mediaList.forEach((att: any, i: number) => {
     if (!att || typeof att !== 'object') return;
     const mimeType = att.mimeType || att.contentType || 'application/octet-stream';
-    const isImage = mimeType.startsWith('image/') || att.kind === 'image';
+    const isImage =
+      (mimeType.startsWith('image/') || att.kind === 'image') && mimeType !== 'image/svg+xml';
     const fileName = att.fileName || att.label || `attachment-${i + 1}`;
     if (isImage && result.some((r) => r.fileName === fileName && r.previewUrl)) {
       return;
     }
     const b64 =
       typeof att.content === 'string' ? att.content : typeof att.data === 'string' ? att.data : '';
-    const previewUrl =
-      isImage && b64
-        ? b64.startsWith('data:')
-          ? b64
-          : `data:${mimeType};base64,${b64}`
-        : isImage &&
-            typeof att.url === 'string' &&
-            (att.url.startsWith('data:') || att.url.startsWith('http'))
-          ? att.url
-          : undefined;
+    const previewUrl = isImage ? sanitizeImagePreviewUrl(att.url, mimeType, b64) : undefined;
     result.push({
       id: `hist-att-${i}-${Date.now()}`,
       fileName,
@@ -254,7 +309,7 @@ async function readFileAsAttachment(
 
   let fileName = file.name?.trim() || '';
   const mimeType = inferMimeType(fileName, file.type);
-  const isImage = mimeType.startsWith('image/');
+  const isImage = mimeType.startsWith('image/') && mimeType !== 'image/svg+xml';
 
   if (!fileName || (origin === 'paste' && /^image\.(png|jpe?g|webp|gif)$/i.test(fileName))) {
     const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || (isImage ? 'png' : 'bin');
@@ -385,9 +440,7 @@ export default function App() {
   useEffect(() => {
     if (!showProfileModal) return;
     const previousFocus = document.activeElement as HTMLElement | null;
-    settingsDialogRef.current
-      ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
-      ?.focus();
+    settingsDialogRef.current?.focus({ preventScroll: true });
     return () => previousFocus?.focus();
   }, [showProfileModal]);
 
@@ -786,13 +839,9 @@ export default function App() {
         setAutoConnect(true);
         const newDeviceToken = status.hello?.auth?.deviceToken;
         if (newDeviceToken && typeof newDeviceToken === 'string') {
-          const currentActiveId = activeProfileIdRef.current;
+          const targetProfileId = status.profileId || activeProfileIdRef.current;
           setProfiles((prev) =>
-            prev.map((p) =>
-              p.id === currentActiveId || (status.endpoint && p.endpoint === status.endpoint)
-                ? { ...p, deviceToken: newDeviceToken }
-                : p
-            )
+            prev.map((p) => (p.id === targetProfileId ? { ...p, deviceToken: newDeviceToken } : p))
           );
         }
       }
@@ -964,6 +1013,96 @@ export default function App() {
         if (resolvedId) {
           setApprovals((prev) => prev.filter((x) => x.id !== resolvedId));
         }
+        return;
+      }
+
+      // Live Session Changes (synced from Web Control UI, CLI, or other clients)
+      if (
+        eventName === 'sessions.changed' ||
+        eventName === 'session:patch' ||
+        eventName === 'session.updated' ||
+        eventName === 'sessions.updated'
+      ) {
+        const rawSessions: any[] = [];
+        if (Array.isArray(payload.sessions)) {
+          rawSessions.push(...payload.sessions);
+        } else if (Array.isArray(payload.list)) {
+          rawSessions.push(...payload.list);
+        }
+        const singleSession =
+          payload.session || payload.entry || payload.row || (payload.key ? payload : null);
+        if (singleSession && typeof singleSession.key === 'string') {
+          rawSessions.push(singleSession);
+        }
+
+        const currentAgent = uiStateRef.current.selectedAgentId || selectedAgentId || 'main';
+
+        if (rawSessions.length > 0) {
+          setSessions((prev) => {
+            let updated = false;
+            const next = prev.map((s) => {
+              const sAgent = s.agentId || currentAgent;
+              const sGatewayKey = toGatewaySessionKey(sAgent, s.key);
+
+              const match = rawSessions.find((item) => {
+                if (!item || typeof item.key !== 'string') return false;
+                const itemAgent = sessionAgentId(item.key, item.agentId || sAgent);
+                const itemGatewayKey = toGatewaySessionKey(itemAgent, item.key);
+                return item.key === s.key || itemGatewayKey === sGatewayKey;
+              });
+
+              if (!match) return s;
+              updated = true;
+
+              const model =
+                typeof match.model === 'string'
+                  ? match.model
+                  : typeof match.resolved?.model === 'string'
+                    ? match.resolved.model
+                    : s.model;
+              const modelProvider =
+                typeof match.modelProvider === 'string'
+                  ? match.modelProvider
+                  : typeof match.resolved?.modelProvider === 'string'
+                    ? match.resolved.modelProvider
+                    : s.modelProvider;
+
+              const hasThinking =
+                Object.prototype.hasOwnProperty.call(match, 'thinkingLevel') ||
+                Object.prototype.hasOwnProperty.call(match.entry || {}, 'thinkingLevel');
+              const thinkingRaw = Object.prototype.hasOwnProperty.call(match, 'thinkingLevel')
+                ? match.thinkingLevel
+                : match.entry?.thinkingLevel;
+              const thinkingLevel = hasThinking
+                ? typeof thinkingRaw === 'string' && thinkingRaw.trim()
+                  ? thinkingRaw.trim()
+                  : undefined
+                : s.thinkingLevel;
+
+              const label =
+                typeof match.label === 'string' && match.label.trim()
+                  ? match.label
+                  : typeof match.entry?.label === 'string' && match.entry.label.trim()
+                    ? match.entry.label
+                    : s.label;
+
+              return {
+                ...s,
+                ...(model !== undefined ? { model } : {}),
+                ...(modelProvider !== undefined ? { modelProvider } : {}),
+                ...(hasThinking ? { thinkingLevel } : {}),
+                ...(label !== undefined ? { label } : {}),
+                ...sessionThinkingMetadata(match, undefined),
+              };
+            });
+            return updated ? next : prev;
+          });
+        }
+
+        // Trigger a background refresh to keep labels and session list completely synced
+        const preferredSession =
+          uiStateRef.current.selectedSessionKey || selectedSessionKey || 'main';
+        void fetchSessionsAndSyncSelection(currentAgent, preferredSession);
         return;
       }
 
@@ -1276,6 +1415,9 @@ export default function App() {
   async function refreshGatewayState(agentOverride?: string, sessionOverride?: string) {
     const api = window.openclawApi;
     if (!api) return;
+
+    // Subscribe to live session roster updates if supported by Gateway
+    void api.request('sessions.subscribe', {}).catch(() => {});
 
     saveCurrentSessionScrollPosition();
 
@@ -2708,17 +2850,11 @@ export default function App() {
                       Run via SSH / Server Terminal
                     </span>
                   </div>
-                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    {connStatus.details?.requestId
-                      ? 'Run this command to approve your specific pending request ID:'
-                      : 'Approve the latest pending device request directly, or list pending requests first:'}
-                  </p>
-
                   {(() => {
                     const prefix = useDockerCmds
                       ? 'docker compose exec openclaw-gateway openclaw'
                       : 'openclaw';
-                    const reqId = connStatus.details?.requestId;
+                    const reqId = sanitizePairingRequestId(connStatus.details?.requestId);
                     const primaryCmd = reqId
                       ? `${prefix} devices approve ${reqId}`
                       : `${prefix} devices approve --latest`;
@@ -2726,6 +2862,11 @@ export default function App() {
 
                     return (
                       <>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                          {reqId
+                            ? 'Run this command to approve your specific pending request ID:'
+                            : 'Approve the latest pending device request directly, or list pending requests first:'}
+                        </p>
                         <div className="cmd-row">
                           <code style={{ wordBreak: 'break-all' }}>{primaryCmd}</code>
                           <button
@@ -2773,29 +2914,31 @@ export default function App() {
                     <code>{activeProfile?.endpoint}</code>, you can also approve this device under{' '}
                     <strong>Nodes / Devices</strong> by matching this Device ID:
                   </p>
-                  <div className="cmd-row">
-                    <code
-                      style={{
-                        fontSize: '11.5px',
-                        wordBreak: 'break-all',
-                        color: 'var(--text-muted)',
-                      }}
-                    >
-                      {connStatus.deviceId || sysInfo?.deviceIdentity?.deviceId || 'Generating...'}
-                    </code>
-                    <button
-                      className="btn"
-                      style={{ padding: '3px 9px', fontSize: '11.5px', flexShrink: 0 }}
-                      onClick={() =>
-                        copyText(
-                          connStatus.deviceId || sysInfo?.deviceIdentity?.deviceId || '',
-                          'devid'
-                        )
-                      }
-                    >
-                      {copiedCmd === 'devid' ? '✓ Copied' : 'Copy ID'}
-                    </button>
-                  </div>
+                  {(() => {
+                    const safeDeviceId =
+                      sanitizeDeviceId(connStatus.deviceId) ||
+                      sanitizeDeviceId(sysInfo?.deviceIdentity?.deviceId);
+                    return (
+                      <div className="cmd-row">
+                        <code
+                          style={{
+                            fontSize: '11.5px',
+                            wordBreak: 'break-all',
+                            color: 'var(--text-muted)',
+                          }}
+                        >
+                          {safeDeviceId || 'Generating...'}
+                        </code>
+                        <button
+                          className="btn"
+                          style={{ padding: '3px 9px', fontSize: '11.5px', flexShrink: 0 }}
+                          onClick={() => copyText(safeDeviceId || '', 'devid')}
+                        >
+                          {copiedCmd === 'devid' ? '✓ Copied' : 'Copy ID'}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Step 3: Optional Token inline input */}
@@ -2925,6 +3068,22 @@ export default function App() {
                     />
                     <span>Allow self-signed / private TLS certificates</span>
                   </label>
+                  {Boolean(activeProfile?.allowInsecureTls) && (
+                    <div
+                      style={{
+                        marginTop: '6px',
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        color: '#f87171',
+                        fontSize: '11px',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      ⚠️ <strong>Security Risk:</strong> TLS certificate verification is disabled. An attacker on the local network could intercept authentication tokens, passwords, and conversation data. Only use on trusted private networks.
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
@@ -3614,6 +3773,7 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-title"
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key !== 'Tab') return;
@@ -3624,6 +3784,15 @@ export default function App() {
               );
               const first = controls[0];
               const last = controls[controls.length - 1];
+              if (document.activeElement === e.currentTarget) {
+                e.preventDefault();
+                if (e.shiftKey) {
+                  last?.focus();
+                } else {
+                  first?.focus();
+                }
+                return;
+              }
               if (e.shiftKey && document.activeElement === first) {
                 e.preventDefault();
                 last?.focus();
@@ -3857,6 +4026,32 @@ export default function App() {
                           : 'win32'}
                       </span>
                     </div>
+                    <div className="session-detail-row">
+                      <span className="session-detail-label">Credential Storage</span>
+                      <span className="session-detail-value">
+                        {sysInfo?.encryptedStorage !== false ? (
+                          <span style={{ color: 'var(--text-accent)' }}>Protected (Windows DPAPI)</span>
+                        ) : (
+                          <span style={{ color: '#f87171' }}>⚠️ Unencrypted (Non-Windows host)</span>
+                        )}
+                      </span>
+                    </div>
+                    {sysInfo?.encryptedStorage === false && (
+                      <div
+                        style={{
+                          marginTop: '6px',
+                          padding: '6px 10px',
+                          borderRadius: '6px',
+                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          color: '#f87171',
+                          fontSize: '11px',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        ⚠️ Encrypted credential storage is not supported on this platform. Gateway tokens, passwords, and private keys are saved in plaintext.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -3918,6 +4113,19 @@ export default function App() {
                           value={activeProfile.endpoint}
                           onChange={(e) => updateActiveProfileField('endpoint', e.target.value)}
                         />
+                        {isUnencryptedRemoteGatewayEndpoint(activeProfile.endpoint) && (
+                          <div
+                            style={{
+                              marginTop: '4px',
+                              fontSize: '11.5px',
+                              color: 'var(--text-warn, #f59e0b)',
+                            }}
+                          >
+                            Warning: Unencrypted <code>ws://</code> / <code>http://</code> sends
+                            Gateway credentials and messages in cleartext over the network. Use{' '}
+                            <code>wss://</code> or <code>https://</code> for remote hosts.
+                          </div>
+                        )}
                       </div>
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -3982,6 +4190,21 @@ export default function App() {
                             Allow self-signed / private TLS certificates (for LAN / custom HTTPS)
                           </span>
                         </label>
+                        {Boolean(activeProfile.allowInsecureTls) && (
+                          <div
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              color: '#f87171',
+                              fontSize: '11px',
+                              lineHeight: 1.4,
+                            }}
+                          >
+                            ⚠️ <strong>Security Risk:</strong> TLS certificate verification is disabled. An attacker on the local network could intercept authentication tokens, passwords, and conversation data. Only use on trusted private networks.
+                          </div>
+                        )}
 
                         <label
                           style={{

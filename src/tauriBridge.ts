@@ -23,16 +23,35 @@ export function initTauriBridge(): void {
   const tauri = window.__TAURI__;
   if (!tauri?.core?.invoke) return;
 
+  const invoke = tauri.core.invoke;
+  const listen = tauri.event?.listen;
+
+  // Scrub raw Tauri internals from window to reduce IPC attack surface
+  try {
+    delete (window as any).__TAURI__;
+    delete (window as any).__TAURI_INTERNALS__;
+  } catch {}
+  if ((window as any).__TAURI__) {
+    try {
+      (window as any).__TAURI__ = undefined;
+    } catch {}
+  }
+  if ((window as any).__TAURI_INTERNALS__) {
+    try {
+      (window as any).__TAURI_INTERNALS__ = undefined;
+    } catch {}
+  }
+
   const invokeWithError = async <T = any>(cmd: string, args?: Record<string, any>): Promise<T> => {
     try {
-      return await tauri.core.invoke<T>(cmd, args);
+      return await invoke<T>(cmd, args);
     } catch (err: any) {
       if (err instanceof Error) throw err;
       throw new Error(typeof err === 'string' ? err : JSON.stringify(err));
     }
   };
 
-  window.openclawApi = {
+  const api = {
     getSystemInfo: () => invokeWithError<SystemInfo>('get_system_info'),
 
     loadProfiles: () =>
@@ -65,22 +84,26 @@ export function initTauriBridge(): void {
 
     quitApp: () => invokeWithError<void>('quit_app'),
 
+    openExternalUrl: (url: string) =>
+      invokeWithError<{ ok: boolean }>('open_external_url', { url }),
+
     onStatus: (callback: (status: ConnectionStatus) => void) => {
       let unlisten: (() => void) | null = null;
       let disposed = false;
-      tauri.event
-        .listen<ConnectionStatus>('gateway:status', (evt) => {
+      if (listen) {
+        listen<ConnectionStatus>('gateway:status', (evt) => {
           if (!disposed) {
             callback(evt.payload);
           }
         })
-        .then((fn) => {
-          if (disposed) {
-            fn();
-          } else {
-            unlisten = fn;
-          }
-        });
+          .then((fn) => {
+            if (disposed) {
+              fn();
+            } else {
+              unlisten = fn;
+            }
+          });
+      }
       return () => {
         disposed = true;
         if (unlisten) unlisten();
@@ -90,23 +113,36 @@ export function initTauriBridge(): void {
     onGatewayEvent: (callback: (frame: any) => void) => {
       let unlisten: (() => void) | null = null;
       let disposed = false;
-      tauri.event
-        .listen<any>('gateway:event', (evt) => {
+      if (listen) {
+        listen<any>('gateway:event', (evt) => {
           if (!disposed) {
             callback(evt.payload);
           }
         })
-        .then((fn) => {
-          if (disposed) {
-            fn();
-          } else {
-            unlisten = fn;
-          }
-        });
+          .then((fn) => {
+            if (disposed) {
+              fn();
+            } else {
+              unlisten = fn;
+            }
+          });
+      }
       return () => {
         disposed = true;
         if (unlisten) unlisten();
       };
     },
   };
+
+  Object.freeze(api);
+  try {
+    Object.defineProperty(window, 'openclawApi', {
+      value: api,
+      writable: false,
+      configurable: false,
+      enumerable: true,
+    });
+  } catch {
+    window.openclawApi = api;
+  }
 }

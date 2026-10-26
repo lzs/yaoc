@@ -103,6 +103,7 @@ export interface ExecApprovalRequest {
 
 export interface ConnectionStatus {
   state: 'disconnected' | 'connecting' | 'connected' | 'pairing' | 'error';
+  profileId?: string;
   endpoint?: string;
   message?: string;
   code?: string;
@@ -115,6 +116,7 @@ export interface SystemInfo {
   platform: string;
   arch: string;
   runtime?: string;
+  encryptedStorage?: boolean;
   deviceIdentity?: {
     deviceId: string;
     publicKey: string;
@@ -158,6 +160,7 @@ declare global {
       request: (method: string, params?: any, timeoutMs?: number) => Promise<any>;
       setGlobalHotkey?: (hotkey: string) => Promise<{ ok: boolean; hotkey: string }>;
       quitApp?: () => Promise<void>;
+      openExternalUrl?: (url: string) => Promise<{ ok: boolean }>;
       onStatus: (callback: (status: ConnectionStatus) => void) => () => void;
       onGatewayEvent: (callback: (frame: any) => void) => () => void;
     };

@@ -56,43 +56,132 @@ mod embedded_loader {
         fn GetProcAddress(hModule: *mut c_void, lpProcName: *const u8) -> *mut c_void;
     }
 
-    static MODULE_HANDLE: OnceLock<usize> = OnceLock::new();
+    static MODULE_HANDLE: OnceLock<(usize, Option<std::fs::File>)> = OnceLock::new();
+    static FALLBACK_USERDATA_DIR: OnceLock<(std::path::PathBuf, Option<std::fs::File>)> =
+        OnceLock::new();
+
+    pub(super) fn prune_stale_loader_dirs(root: &std::path::Path) {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+
+    fn prune_stale_fallback_userdata_dirs(base_dir: &std::path::Path) {
+        use std::os::windows::fs::OpenOptionsExt;
+        let Ok(entries) = std::fs::read_dir(base_dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.starts_with("EBWebView-") {
+                continue;
+            }
+            let instance_lock = path.join(".instance.lock");
+            if instance_lock.exists() {
+                let Ok(lock_handle) = std::fs::OpenOptions::new()
+                    .write(true)
+                    .share_mode(0)
+                    .open(&instance_lock)
+                else {
+                    continue;
+                };
+                drop(lock_handle);
+            }
+            let wv_lock = path.join("EBWebView").join("lockfile");
+            if wv_lock.exists()
+                && std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&wv_lock)
+                    .is_err()
+            {
+                continue;
+            }
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
 
     fn get_proc(name: &[u8]) -> Option<*mut c_void> {
-        let hmod = *MODULE_HANDLE.get_or_init(|| {
+        let (hmod, _) = MODULE_HANDLE.get_or_init(|| {
             use std::hash::{BuildHasher, Hasher};
             use std::io::Write;
             use std::os::windows::ffi::OsStrExt;
             use std::os::windows::fs::OpenOptionsExt;
             // A private per-process directory prevents reuse of an attacker-planted cache.
-            let root = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
-                .unwrap_or_else(std::env::temp_dir).join("yaoc").join("WebView2Loader");
-            if std::fs::create_dir_all(&root).is_err() { return 0; }
+            let root = std::env::var_os("LOCALAPPDATA")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir)
+                .join("yaoc")
+                .join("WebView2Loader");
+            if std::fs::create_dir_all(&root).is_err() {
+                return (0, None);
+            }
+            prune_stale_loader_dirs(&root);
             let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
             hasher.write_u32(std::process::id());
             let dir = root.join(format!("{}-{:016x}", std::process::id(), hasher.finish()));
-            if std::fs::create_dir(&dir).is_err() { return 0; }
+            if std::fs::create_dir(&dir).is_err() {
+                return (0, None);
+            }
             let dll_path = dir.join(format!("WebView2Loader-{ARCH_NAME}.dll"));
             let written = (|| -> std::io::Result<()> {
-                let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&dll_path)?;
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&dll_path)?;
                 file.write_all(LOADER_BYTES)?;
                 file.sync_all()
             })();
-            if written.is_err() { return 0; }
-            // Deny concurrent writes/deletion while validating and loading the exact bytes.
-            let Ok(mut locked) = std::fs::OpenOptions::new().read(true).share_mode(1).open(&dll_path) else { return 0; };
-            if locked.metadata().map(|info| info.len() != LOADER_BYTES.len() as u64).unwrap_or(true) { return 0; }
+            if written.is_err() {
+                return (0, None);
+            }
+            // Keep the read-locked handle open for the process lifetime to deny concurrent writes/deletion.
+            let Ok(mut locked) = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .open(&dll_path)
+            else {
+                return (0, None);
+            };
+            if locked
+                .metadata()
+                .map(|info| info.len() != LOADER_BYTES.len() as u64)
+                .unwrap_or(true)
+            {
+                return (0, None);
+            }
             let mut bytes = Vec::with_capacity(LOADER_BYTES.len());
-            if std::io::Read::read_to_end(&mut locked, &mut bytes).is_err() || bytes != LOADER_BYTES { return 0; }
+            if std::io::Read::read_to_end(&mut locked, &mut bytes).is_err() || bytes != LOADER_BYTES
+            {
+                return (0, None);
+            }
             let wide: Vec<u16> = dll_path.as_os_str().encode_wide().chain(Some(0)).collect();
             // Search this DLL's directory and System32, never the current working directory.
-            unsafe { LoadLibraryExW(wide.as_ptr(), std::ptr::null_mut(), 0x00000100 | 0x00000800) as usize }
-
+            let handle = unsafe {
+                LoadLibraryExW(
+                    wide.as_ptr(),
+                    std::ptr::null_mut(),
+                    0x00000100 | 0x00000800,
+                ) as usize
+            };
+            (handle, Some(locked))
         });
-        if hmod == 0 {
+        if *hmod == 0 {
             return None;
         }
-        let ptr = unsafe { GetProcAddress(hmod as *mut c_void, name.as_ptr()) };
+        let ptr = unsafe { GetProcAddress(*hmod as *mut c_void, name.as_ptr()) };
         if ptr.is_null() {
             None
         } else {
@@ -144,10 +233,11 @@ mod embedded_loader {
             let f: FnType = core::mem::transmute(p);
 
             // Check if the default EBWebView lockfile is currently locked by another instance
-            let base_dir = std::env::var("LOCALAPPDATA")
+            let base_dir = std::env::var_os("LOCALAPPDATA")
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::env::temp_dir())
+                .unwrap_or_else(std::env::temp_dir)
                 .join("ai.openclaw.chat.lite");
+            prune_stale_fallback_userdata_dirs(&base_dir);
             let lock_file = base_dir.join("EBWebView").join("lockfile");
             let is_locked = if lock_file.exists() {
                 std::fs::OpenOptions::new().write(true).open(&lock_file).is_err()
@@ -167,9 +257,26 @@ mod embedded_loader {
                 }
             }
 
-            // Fallback to a per-process userdatafolder so multiple/concurrent instances never fail with 0x800700AA
-            let fallback_dir = base_dir.join(format!("EBWebView-{}", std::process::id()));
-            let _ = std::fs::create_dir_all(&fallback_dir);
+            // Fallback to a per-process unique userdatafolder so concurrent instances never collide via PID reuse
+            let (fallback_dir, _) = FALLBACK_USERDATA_DIR.get_or_init(|| {
+                use std::hash::{BuildHasher, Hasher};
+                use std::os::windows::fs::OpenOptionsExt;
+                let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+                hasher.write_u32(std::process::id());
+                let dir = base_dir.join(format!(
+                    "EBWebView-{}-{:016x}",
+                    std::process::id(),
+                    hasher.finish()
+                ));
+                let _ = std::fs::create_dir_all(&dir);
+                let lock = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .share_mode(0)
+                    .open(dir.join(".instance.lock"))
+                    .ok();
+                (dir, lock)
+            });
             use std::os::windows::ffi::OsStrExt;
             let mut wide: Vec<u16> = fallback_dir.as_os_str().encode_wide().collect();
             wide.push(0);
@@ -217,8 +324,35 @@ mod embedded_loader {
 #[cfg(test)]
 mod loader_tests {
     #[test]
-    fn embedded_loader_has_expected_exports() {
+    fn embedded_loader_has_expected_exports_and_prunes_stale_dirs() {
         use super::embedded_loader;
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let temp_root = std::env::temp_dir().join(format!(
+            "yaoc-loader-prune-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_root);
+        let stale_dir = temp_root.join("1111-stale");
+        let active_dir = temp_root.join("2222-active");
+        std::fs::create_dir_all(&stale_dir).unwrap();
+        std::fs::create_dir_all(&active_dir).unwrap();
+        std::fs::write(stale_dir.join("WebView2Loader-x64.dll"), b"stale").unwrap();
+        let active_dll = active_dir.join("WebView2Loader-x64.dll");
+        std::fs::write(&active_dll, b"active").unwrap();
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&active_dll)
+            .unwrap();
+
+        embedded_loader::prune_stale_loader_dirs(&temp_root);
+        assert!(!stale_dir.exists());
+        assert!(active_dir.exists());
+
+        drop(locked);
+        let _ = std::fs::remove_dir_all(&temp_root);
+
         assert!(embedded_loader::test_export(b"GetAvailableCoreWebView2BrowserVersionString\0"));
         assert!(embedded_loader::test_export(b"CreateCoreWebView2EnvironmentWithOptions\0"));
     }

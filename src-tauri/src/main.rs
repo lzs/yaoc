@@ -69,11 +69,13 @@ pub struct DeviceIdentity {
 }
 
 fn get_storage_dir() -> PathBuf {
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        PathBuf::from(appdata).join("openclaw-chat")
-    } else {
-        std::env::temp_dir().join("openclaw-chat")
-    }
+    storage::user_storage_dir()
+}
+
+fn serialize_device_identity_for_disk(identity: &DeviceIdentity) -> Result<String, String> {
+    let mut disk_identity = identity.clone();
+    disk_identity.private_key_pem = storage::protect_secret(&identity.private_key_pem)?;
+    serde_json::to_string_pretty(&disk_identity).map_err(|e| e.to_string())
 }
 
 fn load_or_create_device_identity() -> Result<DeviceIdentity, String> {
@@ -81,8 +83,11 @@ fn load_or_create_device_identity() -> Result<DeviceIdentity, String> {
     let file_path = dir.join("device-identity.json");
     match fs::read_to_string(&file_path) {
         Ok(raw) => {
-            let identity: DeviceIdentity = serde_json::from_str(&raw)
+            let mut identity: DeviceIdentity = serde_json::from_str(&raw)
                 .map_err(|e| format!("Saved device identity is invalid; restore device-identity.json from a backup: {e}"))?;
+            let (private_key_pem, was_protected) =
+                storage::unprotect_secret(&identity.private_key_pem)?;
+            identity.private_key_pem = private_key_pem;
             let key = SigningKey::from_pkcs8_pem(&identity.private_key_pem)
                 .map_err(|_| "Saved device identity contains an invalid private key".to_string())?;
             let public_key = key.verifying_key().to_bytes();
@@ -90,6 +95,11 @@ fn load_or_create_device_identity() -> Result<DeviceIdentity, String> {
                 || identity.device_id != hex::encode(Sha256::digest(public_key))
             {
                 return Err("Saved device identity does not match its private key".to_string());
+            }
+            if !was_protected {
+                if let Ok(serialized) = serialize_device_identity_for_disk(&identity) {
+                    let _ = atomic_write(&file_path, &serialized);
+                }
             }
             return Ok(identity);
         }
@@ -122,7 +132,7 @@ fn load_or_create_device_identity() -> Result<DeviceIdentity, String> {
     };
 
     fs::create_dir_all(&dir).map_err(|e| format!("Could not create settings directory: {e}"))?;
-    let serialized = serde_json::to_string_pretty(&identity).map_err(|e| e.to_string())?;
+    let serialized = serialize_device_identity_for_disk(&identity)?;
     atomic_write(&file_path, &serialized)
         .map_err(|e| format!("Could not save device identity: {e}"))?;
     Ok(identity)
@@ -140,6 +150,18 @@ struct DeviceChallenge<'a> {
     device_family: &'a str,
 }
 
+fn validate_challenge_field(name: &str, value: &str, allow_empty: bool) -> Result<(), String> {
+    if !allow_empty && value.trim().is_empty() {
+        return Err(format!("Device challenge field '{name}' cannot be empty"));
+    }
+    if value.chars().any(|ch| ch == '|' || ch.is_control()) {
+        return Err(format!(
+            "Device challenge field '{name}' contains disallowed delimiter or control characters"
+        ));
+    }
+    Ok(())
+}
+
 fn sign_device_challenge_v3(
     identity: &DeviceIdentity,
     challenge: DeviceChallenge<'_>,
@@ -155,6 +177,22 @@ fn sign_device_challenge_v3(
         platform,
         device_family,
     } = challenge;
+    validate_challenge_field("deviceId", &identity.device_id, false)?;
+    validate_challenge_field("clientId", client_id, false)?;
+    validate_challenge_field("clientMode", client_mode, false)?;
+    validate_challenge_field("role", role, false)?;
+    validate_challenge_field("token", token, true)?;
+    validate_challenge_field("nonce", nonce, false)?;
+    validate_challenge_field("platform", platform, false)?;
+    validate_challenge_field("deviceFamily", device_family, false)?;
+    for scope in scopes {
+        validate_challenge_field("scope", scope, false)?;
+        if scope.contains(',') {
+            return Err(
+                "Device challenge field 'scope' contains disallowed comma delimiter".to_string(),
+            );
+        }
+    }
     let payload = format!(
         "v3|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         identity.device_id,
@@ -174,27 +212,43 @@ fn sign_device_challenge_v3(
     Ok(URL_SAFE_NO_PAD.encode(sig.to_bytes()))
 }
 
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host == "127.0.0.1"
+        || host == "[::1]"
+        || host == "::1"
+}
+
 fn normalize_gateway_url(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return "ws://127.0.0.1:18789".to_string();
     }
-    if trimmed.starts_with("mock://")
-        || trimmed.starts_with("ws://")
-        || trimmed.starts_with("wss://")
-    {
-        return trimmed.to_string();
+    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("mock://") {
+        return format!("mock://{}", &trimmed[7..]);
     }
-    if let Some(rest) = trimmed.strip_prefix("http://") {
-        return format!("ws://{}", rest);
+    if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("ws://") {
+        return format!("ws://{}", &trimmed[5..]);
     }
-    if let Some(rest) = trimmed.strip_prefix("https://") {
-        return format!("wss://{}", rest);
+    if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("wss://") {
+        return format!("wss://{}", &trimmed[6..]);
     }
-    if trimmed.starts_with("127.0.0.1") || trimmed.starts_with("localhost") {
-        return format!("ws://{}", trimmed);
+    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("http://") {
+        return format!("ws://{}", &trimmed[7..]);
     }
-    format!("wss://{}", trimmed)
+    if trimmed.len() >= 8 && trimmed[..8].eq_ignore_ascii_case("https://") {
+        return format!("wss://{}", &trimmed[8..]);
+    }
+    let candidate = format!("wss://{trimmed}");
+    if let Ok(parsed) = url::Url::parse(&candidate) {
+        if parsed.username().is_empty()
+            && parsed.password().is_none()
+            && parsed.host_str().is_some_and(is_loopback_host)
+        {
+            return format!("ws://{trimmed}");
+        }
+    }
+    candidate
 }
 
 fn gateway_origin(endpoint: &url::Url) -> Result<String, String> {
@@ -303,7 +357,7 @@ impl GatewayState {
     async fn disconnect_connection(
         &self,
         expected_epoch: Option<u64>,
-        status: Option<(&AppHandle, &str, &str)>,
+        status: Option<(&AppHandle, &str, &str, &str)>,
     ) -> bool {
         let mut tasks = self.connection_tasks.lock().await;
         if expected_epoch.is_some_and(|epoch| !self.is_current_connection(epoch)) {
@@ -315,10 +369,15 @@ impl GatewayState {
         for (_, sender) in self.pending.lock().await.drain() {
             let _ = sender.send(Err(json!({ "message": "Disconnected" })));
         }
-        if let Some((app, endpoint, message)) = status {
+        if let Some((app, profile_id, endpoint, message)) = status {
             let _ = app.emit(
                 "gateway:status",
-                json!({ "state": "disconnected", "endpoint": endpoint, "message": message }),
+                json!({
+                    "state": "disconnected",
+                    "profileId": profile_id,
+                    "endpoint": endpoint,
+                    "message": message
+                }),
             );
         }
         for task in tasks.drain(..) {
@@ -369,6 +428,73 @@ impl GatewayState {
     }
 }
 
+const PROFILE_SECRET_FIELDS: [&str; 3] = ["token", "password", "deviceToken"];
+
+fn decrypt_profiles_value(mut value: Value) -> Result<(Value, bool), String> {
+    let mut needs_migration = false;
+    let profiles = value
+        .get_mut("profiles")
+        .and_then(Value::as_array_mut)
+        .ok_or("Saved profiles are missing the profiles array")?;
+    for profile in profiles {
+        let Some(obj) = profile.as_object_mut() else {
+            return Err("Saved profile entry must be a JSON object".to_string());
+        };
+        for field in PROFILE_SECRET_FIELDS {
+            if let Some(secret_val) = obj.get_mut(field) {
+                if let Some(raw_secret) = secret_val.as_str() {
+                    if !raw_secret.is_empty() {
+                        let (decrypted, was_protected) = storage::unprotect_secret(raw_secret)?;
+                        if !was_protected {
+                            needs_migration = true;
+                        }
+                        *secret_val = Value::String(decrypted);
+                    }
+                }
+            }
+        }
+    }
+    Ok((value, needs_migration))
+}
+
+fn encrypt_profiles_array(mut profiles: Value) -> Result<Value, String> {
+    let arr = profiles
+        .as_array_mut()
+        .ok_or("Invalid connection profiles: expected an array")?;
+    for profile in arr {
+        let Some(obj) = profile.as_object_mut() else {
+            return Err("Invalid connection profile: expected an object".to_string());
+        };
+        for field in PROFILE_SECRET_FIELDS {
+            if let Some(secret_val) = obj.get_mut(field) {
+                if let Some(raw_secret) = secret_val.as_str() {
+                    if !raw_secret.is_empty() {
+                        let encrypted = storage::protect_secret(raw_secret)?;
+                        *secret_val = Value::String(encrypted);
+                    }
+                }
+            }
+        }
+    }
+    Ok(profiles)
+}
+
+fn decrypt_gateway_profile(mut profile: GatewayProfile) -> Result<GatewayProfile, String> {
+    if let Some(ref token) = profile.token {
+        let (decrypted, _) = storage::unprotect_secret(token)?;
+        profile.token = Some(decrypted);
+    }
+    if let Some(ref password) = profile.password {
+        let (decrypted, _) = storage::unprotect_secret(password)?;
+        profile.password = Some(decrypted);
+    }
+    if let Some(ref device_token) = profile.device_token {
+        let (decrypted, _) = storage::unprotect_secret(device_token)?;
+        profile.device_token = Some(decrypted);
+    }
+    Ok(profile)
+}
+
 #[tauri::command]
 fn get_system_info(state: State<'_, Arc<GatewayState>>) -> Value {
     log_boot("IPC get_system_info called");
@@ -376,6 +502,7 @@ fn get_system_info(state: State<'_, Arc<GatewayState>>) -> Value {
         "platform": "win32",
         "arch": std::env::consts::ARCH,
         "runtime": "tauri-v2",
+        "encryptedStorage": cfg!(target_os = "windows"),
         "deviceIdentity": {
             "deviceId": state.identity.device_id,
             "publicKey": state.identity.public_key_base64_url
@@ -394,12 +521,22 @@ fn load_profiles() -> Result<Value, String> {
                     "Saved profiles are invalid; restore gateway-profiles.json from a backup: {e}"
                 )
             })?;
-            let profiles = value
+            let (decrypted_value, needs_migration) = decrypt_profiles_value(value)?;
+            let profiles = decrypted_value
                 .get("profiles")
                 .ok_or("Saved profiles are missing the profiles array")?;
             serde_json::from_value::<Vec<GatewayProfile>>(profiles.clone())
                 .map_err(|e| format!("Saved profiles are invalid: {e}"))?;
-            return Ok(value);
+            if needs_migration {
+                if let Ok(encrypted_profiles) = encrypt_profiles_array(profiles.clone()) {
+                    let mut disk_value = decrypted_value.clone();
+                    disk_value["profiles"] = encrypted_profiles;
+                    if let Ok(pretty) = serde_json::to_string_pretty(&disk_value) {
+                        let _ = atomic_write(&path, &pretty);
+                    }
+                }
+            }
+            return Ok(decrypted_value);
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("Could not read saved profiles: {error}")),
@@ -442,6 +579,7 @@ fn save_profiles(
 ) -> Result<Value, String> {
     serde_json::from_value::<Vec<GatewayProfile>>(profiles.clone())
         .map_err(|e| format!("Invalid connection profiles: {e}"))?;
+    let encrypted_profiles = encrypt_profiles_array(profiles)?;
     let dir = get_storage_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("Could not create settings directory: {e}"))?;
     let path = dir.join("gateway-profiles.json");
@@ -454,7 +592,7 @@ fn save_profiles(
         .or(existing_ui_state)
         .unwrap_or_else(|| json!({}));
     let data = json!({
-        "profiles": profiles,
+        "profiles": encrypted_profiles,
         "activeProfileId": active_profile_id,
         "uiState": final_ui_state
     });
@@ -482,6 +620,8 @@ async fn gateway_connect(
     state: State<'_, Arc<GatewayState>>,
     profile: GatewayProfile,
 ) -> Result<Value, String> {
+    let profile = decrypt_gateway_profile(profile)?;
+    let profile_id = profile.id.clone();
     let _connect_guard = state.connect_lock.lock().await;
     state.disconnect().await;
     let epoch = state.connection_epoch.load(Ordering::SeqCst);
@@ -498,6 +638,7 @@ async fn gateway_connect(
             "gateway:status",
             json!({
                 "state": "connected",
+                "profileId": profile_id,
                 "endpoint": ws_url,
                 "hello": hello
             }),
@@ -509,6 +650,7 @@ async fn gateway_connect(
         "gateway:status",
         json!({
             "state": "connecting",
+            "profileId": profile_id,
             "endpoint": ws_url,
             "message": format!("Connecting to {}...", ws_url)
         }),
@@ -520,7 +662,12 @@ async fn gateway_connect(
             let msg = format!("Invalid URL {}: {}", ws_url, e);
             let _ = app.emit(
                 "gateway:status",
-                json!({ "state": "error", "endpoint": ws_url, "message": msg }),
+                json!({
+                    "state": "error",
+                    "profileId": profile_id,
+                    "endpoint": ws_url,
+                    "message": msg
+                }),
             );
             return Ok(json!({ "ok": false, "error": { "message": msg } }));
         }
@@ -534,7 +681,12 @@ async fn gateway_connect(
             let msg = format!("Failed to build request: {}", e);
             let _ = app.emit(
                 "gateway:status",
-                json!({ "state": "error", "endpoint": ws_url, "message": msg }),
+                json!({
+                    "state": "error",
+                    "profileId": profile_id,
+                    "endpoint": ws_url,
+                    "message": msg
+                }),
             );
             return Ok(json!({ "ok": false, "error": { "message": msg } }));
         }
@@ -569,7 +721,12 @@ async fn gateway_connect(
             let msg = format!("WebSocket connection error: {}", e);
             let _ = app.emit(
                 "gateway:status",
-                json!({ "state": "error", "endpoint": ws_url, "message": msg }),
+                json!({
+                    "state": "error",
+                    "profileId": profile_id,
+                    "endpoint": ws_url,
+                    "message": msg
+                }),
             );
             return Ok(json!({ "ok": false, "error": { "message": msg } }));
         }
@@ -577,7 +734,12 @@ async fn gateway_connect(
             let msg = "Connection timed out after 10s".to_string();
             let _ = app.emit(
                 "gateway:status",
-                json!({ "state": "error", "endpoint": ws_url, "message": msg }),
+                json!({
+                    "state": "error",
+                    "profileId": profile_id,
+                    "endpoint": ws_url,
+                    "message": msg
+                }),
             );
             return Ok(json!({ "ok": false, "error": { "message": msg } }));
         }
@@ -618,6 +780,7 @@ async fn gateway_connect(
     // Reader task
     let state_clone = state.inner().clone();
     let app_clone = app.clone();
+    let profile_id_clone = profile_id.clone();
     let ws_url_clone = ws_url.clone();
     connection_tasks.push(tokio::spawn(async move {
         let mut close_reason = "Gateway connection closed".to_string();
@@ -681,7 +844,12 @@ async fn gateway_connect(
         state_clone
             .disconnect_connection(
                 Some(epoch),
-                Some((&app_clone, &ws_url_clone, &close_reason)),
+                Some((
+                    &app_clone,
+                    &profile_id_clone,
+                    &ws_url_clone,
+                    &close_reason,
+                )),
             )
             .await;
     }));
@@ -774,7 +942,7 @@ async fn gateway_connect(
 
     if profile.include_device_identity.unwrap_or(true) {
         if let Some(ref nonce) = nonce_opt {
-            if let Ok(signature) = sign_device_challenge_v3(
+            match sign_device_challenge_v3(
                 &state.identity,
                 DeviceChallenge {
                     client_id,
@@ -788,13 +956,29 @@ async fn gateway_connect(
                     device_family,
                 },
             ) {
-                connect_params["device"] = json!({
-                    "id": state.identity.device_id,
-                    "publicKey": state.identity.public_key_base64_url,
-                    "signature": signature,
-                    "signedAt": signed_at_ms as u64,
-                    "nonce": nonce
-                });
+                Ok(signature) => {
+                    connect_params["device"] = json!({
+                        "id": state.identity.device_id,
+                        "publicKey": state.identity.public_key_base64_url,
+                        "signature": signature,
+                        "signedAt": signed_at_ms as u64,
+                        "nonce": nonce
+                    });
+                }
+                Err(err) => {
+                    let msg = format!("Invalid device challenge parameters: {err}");
+                    let _ = app.emit(
+                        "gateway:status",
+                        json!({
+                            "state": "error",
+                            "profileId": profile_id,
+                            "endpoint": ws_url,
+                            "message": msg
+                        }),
+                    );
+                    state.disconnect_connection(Some(epoch), None).await;
+                    return Ok(json!({ "ok": false, "error": { "message": msg } }));
+                }
             }
         }
     }
@@ -808,6 +992,7 @@ async fn gateway_connect(
                 "gateway:status",
                 json!({
                     "state": "connected",
+                    "profileId": profile_id,
                     "endpoint": ws_url,
                     "hello": hello
                 }),
@@ -838,6 +1023,7 @@ async fn gateway_connect(
                 "gateway:status",
                 json!({
                     "state": if is_pairing { "pairing" } else { "error" },
+                    "profileId": profile_id,
                     "endpoint": ws_url,
                     "message": msg,
                     "code": code,
@@ -979,10 +1165,26 @@ async fn handle_mock_request(
             let (provider, model) = model_ref
                 .split_once('/')
                 .unwrap_or(("anthropic", model_ref));
+            let patch_frame = json!({
+                "type": "event",
+                "event": "sessions.changed",
+                "payload": {
+                    "reason": "patch",
+                    "session": {
+                        "key": key,
+                        "thinkingLevel": thinking.get(key),
+                        "model": model,
+                        "modelProvider": provider,
+                        "label": labels.get(key)
+                    }
+                }
+            });
+            let _ = app.emit("gateway:event", patch_frame);
             Ok(
                 json!({ "ok": true, "key": key, "entry": { "label": labels.get(key), "thinkingLevel": thinking.get(key) }, "resolved": { "model": model, "modelProvider": provider } }),
             )
         }
+        "sessions.subscribe" => Ok(json!({ "subscribed": true })),
         "sessions.delete" => {
             let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("main");
             state.mock_session_models.lock().await.remove(key);
@@ -1130,6 +1332,56 @@ async fn handle_mock_request(
 fn quit_app(app: AppHandle) {
     log_boot("quit_app command invoked; exiting process");
     app.exit(0);
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<Value, String> {
+    let parsed = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" && scheme != "mailto" {
+        return Err(format!("Unsupported or unsafe URL scheme: {scheme}"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "shell32")]
+        extern "system" {
+            fn ShellExecuteW(
+                hwnd: *mut std::ffi::c_void,
+                lpOperation: *const u16,
+                lpFile: *const u16,
+                lpParameters: *const u16,
+                lpDirectory: *const u16,
+                nShowCmd: i32,
+            ) -> isize;
+        }
+        let file_w: Vec<u16> = parsed.as_str().encode_utf16().chain(Some(0)).collect();
+        let op_w: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                op_w.as_ptr(),
+                file_w.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        };
+        if result <= 32 {
+            return Err(format!("Failed to open URL (ShellExecute error code {result})"));
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        #[cfg(target_os = "macos")]
+        let cmd = "open";
+        #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+        let cmd = "xdg-open";
+        std::process::Command::new(cmd)
+            .arg(parsed.as_str())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn browser: {e}"))?;
+    }
+    Ok(json!({ "ok": true }))
 }
 
 // Re-read visibility, minimization, and focus on the main thread after window operations.
@@ -1727,7 +1979,8 @@ fn main() {
             gateway_disconnect,
             gateway_request,
             set_global_hotkey,
-            quit_app
+            quit_app,
+            open_external_url
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1816,8 +2069,25 @@ mod tests {
             "wss://example.com/gateway"
         );
         assert_eq!(
+            normalize_gateway_url("HTTP://example.com/gateway"),
+            "ws://example.com/gateway"
+        );
+        assert_eq!(
             normalize_gateway_url("localhost:18789"),
             "ws://localhost:18789"
+        );
+        assert_eq!(normalize_gateway_url("[::1]:18789"), "ws://[::1]:18789");
+        assert_eq!(
+            normalize_gateway_url("localhost.example.com:18789"),
+            "wss://localhost.example.com:18789"
+        );
+        assert_eq!(
+            normalize_gateway_url("127.0.0.1.example.com:18789"),
+            "wss://127.0.0.1.example.com:18789"
+        );
+        assert_eq!(
+            normalize_gateway_url("localhost@example.com:18789"),
+            "wss://localhost@example.com:18789"
         );
     }
     #[test]
@@ -1856,5 +2126,101 @@ mod tests {
         let bytes = URL_SAFE_NO_PAD.decode(signature).unwrap();
         let signature = ed25519_dalek::Signature::from_slice(&bytes).unwrap();
         key.verifying_key().verify_strict(b"v3|test-device|gateway-client|ui|operator|operator.read|42|example-token|example-nonce|win32|windows", &signature).unwrap();
+
+        // Delimiter injection in nonce, token, client_id, or scopes is rejected
+        assert!(sign_device_challenge_v3(
+            &identity,
+            DeviceChallenge {
+                client_id: "gateway-client",
+                client_mode: "ui",
+                role: "operator",
+                scopes: &["operator.read"],
+                signed_at_ms: 42,
+                token: "example-token",
+                nonce: "evil|win32|windows",
+                platform: "win32",
+                device_family: "windows",
+            },
+        )
+        .is_err());
+        assert!(sign_device_challenge_v3(
+            &identity,
+            DeviceChallenge {
+                client_id: "gateway|client",
+                client_mode: "ui",
+                role: "operator",
+                scopes: &["operator.read"],
+                signed_at_ms: 42,
+                token: "example-token",
+                nonce: "example-nonce",
+                platform: "win32",
+                device_family: "windows",
+            },
+        )
+        .is_err());
+        assert!(sign_device_challenge_v3(
+            &identity,
+            DeviceChallenge {
+                client_id: "gateway-client",
+                client_mode: "ui",
+                role: "operator",
+                scopes: &["operator.read,operator.admin"],
+                signed_at_ms: 42,
+                token: "example-token",
+                nonce: "example-nonce",
+                platform: "win32",
+                device_family: "windows",
+            },
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn profile_secrets_are_encrypted_for_disk_and_decrypted_on_load() {
+        let profiles = json!([
+            {
+                "id": "p1",
+                "name": "Remote",
+                "endpoint": "wss://example.com",
+                "token": "tok-secret-1",
+                "password": "pw-secret-2",
+                "deviceToken": "dev-secret-3"
+            }
+        ]);
+        let encrypted = encrypt_profiles_array(profiles).unwrap();
+        let p0 = &encrypted.as_array().unwrap()[0];
+        assert!(p0["token"].as_str().unwrap().starts_with(storage::DPAPI_PREFIX));
+        assert!(p0["password"].as_str().unwrap().starts_with(storage::DPAPI_PREFIX));
+        assert!(p0["deviceToken"].as_str().unwrap().starts_with(storage::DPAPI_PREFIX));
+
+        let (decrypted_doc, needs_migration) =
+            decrypt_profiles_value(json!({ "profiles": encrypted })).unwrap();
+        assert!(!needs_migration);
+        let d0 = &decrypted_doc["profiles"].as_array().unwrap()[0];
+        assert_eq!(d0["token"].as_str().unwrap(), "tok-secret-1");
+        assert_eq!(d0["password"].as_str().unwrap(), "pw-secret-2");
+        assert_eq!(d0["deviceToken"].as_str().unwrap(), "dev-secret-3");
+
+        // Legacy plaintext profiles report needs_migration = true
+        let (_, legacy_migration) = decrypt_profiles_value(json!({
+            "profiles": [{ "id": "p1", "name": "Remote", "endpoint": "wss://example.com", "token": "legacy-tok" }]
+        }))
+        .unwrap();
+        assert!(legacy_migration);
+    }
+
+    #[test]
+    fn open_external_url_validates_scheme() {
+        let is_allowed = |raw: &str| {
+            url::Url::parse(raw)
+                .map(|u| ["http", "https", "mailto"].contains(&u.scheme()))
+                .unwrap_or(false)
+        };
+        assert!(is_allowed("https://github.com/openclaw/openclaw"));
+        assert!(is_allowed("http://localhost:18789"));
+        assert!(is_allowed("mailto:security@example.com"));
+        assert!(!is_allowed("file:///C:/Windows/System32/calc.exe"));
+        assert!(!is_allowed("javascript:alert(1)"));
+        assert!(!is_allowed("ms-msdt:/id PCWDiagnostic"));
     }
 }
