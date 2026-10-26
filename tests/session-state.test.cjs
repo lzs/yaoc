@@ -74,7 +74,7 @@ const source = fs
 const renderStart = source.indexOf('\n  return (', source.indexOf('export default function App()'));
 const testSource =
   source.slice(0, renderStart) +
-  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint }; }`;
+  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint, focusComposerInput, composerInputRef }; }`;
 const exportsObject = {};
 vm.runInNewContext(compile(testSource), {
   exports: exportsObject,
@@ -537,6 +537,30 @@ function event(sessionKey, state, extra = {}) {
   console.log(
     'PASS: live session synchronization (sessions.changed updates thinkingLevel and model in real-time)'
   );
+
+  // Session selection returns focus and positions cursor at the end of the message entry box
+  let composerFocused = false;
+  let cursorSelection = null;
+  view.composerInputRef.current = {
+    disabled: false,
+    value: 'Hello draft',
+    selectionStart: 0,
+    selectionEnd: 0,
+    focus() {
+      composerFocused = true;
+    },
+    setSelectionRange(start, end) {
+      cursorSelection = { start, end };
+    },
+  };
+  view.handleSelectSession('main');
+  assert.equal(composerFocused, true, 'Message entry box must receive focus on session selection');
+  assert.deepEqual(
+    cursorSelection,
+    { start: 11, end: 11 },
+    'Caret must be placed at the end of the message entry box'
+  );
+  console.log('PASS: session selection returns focus to message entry box with cursor at end');
 
   console.log(
     'PASS: session isolation, drafts/attachments, background completion, abort IDs, lifecycle, timeout, delayed failure routing and connection loss'

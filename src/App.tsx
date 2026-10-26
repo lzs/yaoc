@@ -618,6 +618,22 @@ export default function App() {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
   }, [composerText]);
+
+  function focusComposerInput() {
+    const focus = () => {
+      const el = composerInputRef.current;
+      if (!el || el.disabled) return;
+      el.focus();
+      if (typeof el.selectionStart === 'number' && typeof el.selectionEnd === 'number') {
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    };
+    focus();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(focus);
+    }
+  }
   const [isDraggingOverChat, setIsDraggingOverChat] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<{ url: string; fileName: string } | null>(
     null
@@ -2520,14 +2536,20 @@ export default function App() {
     }
   }
 
-  function handleSelectSession(key: string) {
+  function handleSelectSession(key: string, focusComposer = true) {
     const gatewayKey = toGatewaySessionKey(selectedAgentId, key);
+    const isDifferent = gatewayKey !== selectedSessionKey;
     saveCurrentSessionScrollPosition();
     markSessionUnread(gatewayKey, false);
     activeGatewaySessionKeyRef.current = gatewayKey;
     uiStateRef.current = { ...uiStateRef.current, selectedSessionKey: gatewayKey };
     setSelectedSessionKey(gatewayKey);
-    if (connStatus.state === 'connected') loadChatHistory(gatewayKey);
+    if (connStatus.state === 'connected' && (isDifferent || loadedSessionKeyRef.current !== gatewayKey)) {
+      loadChatHistory(gatewayKey);
+    }
+    if (focusComposer) {
+      focusComposerInput();
+    }
   }
 
   async function handleCreateSession() {
@@ -2570,6 +2592,7 @@ export default function App() {
     uiStateRef.current = { ...uiStateRef.current, selectedSessionKey: gatewayKey };
     setSelectedSessionKey(gatewayKey);
     setMessages([]);
+    focusComposerInput();
     if (connStatus.state === 'connected' && window.openclawApi) {
       try {
         const result = await window.openclawApi.request('sessions.patch', {
