@@ -25,7 +25,6 @@ import {
   Square,
   Terminal,
   Trash2,
-  Wrench,
   X,
 } from 'lucide-react';
 import {
@@ -51,6 +50,7 @@ import {
   toGatewaySessionKey,
 } from './models';
 import { hasMarkdownSyntax, MarkdownContent } from './markdown';
+import { ToolCallCard } from './ToolCallCard';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
 
@@ -93,6 +93,91 @@ function extractMessageText(rawContent: any): string {
   }
   if (rawContent && typeof rawContent.text === 'string') return rawContent.text;
   return '';
+}
+
+function extractThinkingText(rawMsg: any): string | undefined {
+  if (typeof rawMsg?.thinking === 'string' && rawMsg.thinking) {
+    return rawMsg.thinking;
+  }
+  if (Array.isArray(rawMsg?.content)) {
+    const thinkParts = rawMsg.content
+      .filter((p: any) => p?.type === 'thinking' && typeof p?.thinking === 'string')
+      .map((p: any) => p.thinking);
+    if (thinkParts.length > 0) return thinkParts.join('\n');
+  }
+  return undefined;
+}
+
+function safeParseJson(raw: any): any {
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function extractToolCallsFromRaw(rawMsg: any): ToolCallItem[] {
+  if (!rawMsg) return [];
+  const result: ToolCallItem[] = [];
+
+  // 1. Direct toolCalls or tool_calls property
+  const directList = rawMsg.toolCalls || rawMsg.tool_calls;
+  if (Array.isArray(directList)) {
+    for (const tc of directList) {
+      if (!tc) continue;
+      const id = String(tc.id || tc.toolCallId || tc.call_id || `tc-${result.length}`);
+      const name = String(tc.name || tc.toolName || tc.function?.name || 'tool');
+      const args =
+        tc.args ??
+        tc.input ??
+        tc.parameters ??
+        (tc.function?.arguments ? safeParseJson(tc.function.arguments) : undefined);
+      const res = tc.result ?? tc.output ?? tc.response;
+      const status: 'running' | 'completed' | 'error' =
+        tc.status === 'running' || tc.status === 'error' || tc.status === 'completed'
+          ? tc.status
+          : tc.error
+            ? 'error'
+            : res !== undefined
+              ? 'completed'
+              : 'completed';
+      const exitCode = typeof tc.exitCode === 'number' ? tc.exitCode : undefined;
+      const durationMs = typeof tc.durationMs === 'number' ? tc.durationMs : undefined;
+      const error = tc.error
+        ? typeof tc.error === 'string'
+          ? tc.error
+          : JSON.stringify(tc.error)
+        : undefined;
+      result.push({ id, name, status, args, result: res, error, exitCode, durationMs });
+    }
+  }
+
+  // 2. Content array with tool_use blocks (Anthropic / OpenClaw format)
+  if (Array.isArray(rawMsg.content)) {
+    for (const part of rawMsg.content) {
+      if (!part || typeof part !== 'object') continue;
+      if (part.type === 'tool_use' || part.type === 'tool_call') {
+        const id = String(part.id || part.toolCallId || `tc-${result.length}`);
+        if (!result.some((r) => r.id === id)) {
+          const name = String(part.name || part.toolName || 'tool');
+          const args =
+            part.input ??
+            part.args ??
+            part.parameters ??
+            (part.function?.arguments ? safeParseJson(part.function.arguments) : undefined);
+          result.push({
+            id,
+            name,
+            status: 'completed',
+            args,
+          });
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 function sanitizePairingRequestId(raw: unknown): string | null {
@@ -1207,21 +1292,79 @@ export default function App() {
 
         if (streamType === 'tool' || payload.toolCall || payload.tool) {
           const tcRaw = payload.toolCall || payload.tool || payload.data || payload;
-          const tc: ToolCallItem = {
-            id: tcRaw.id || tcRaw.toolCallId || `tc-${Date.now()}`,
-            name: tcRaw.name || tcRaw.toolName || 'tool',
-            status: tcRaw.status || 'completed',
-            args: tcRaw.args || tcRaw.input,
-            result: tcRaw.result || tcRaw.output,
-          };
+          const tcId = String(tcRaw.id || tcRaw.toolCallId || tcRaw.call_id || `tc-${Date.now()}`);
+          const tcName = String(tcRaw.name || tcRaw.toolName || tcRaw.function?.name || 'tool');
+          const phase = payload.phase || payload.lifecycle;
+          const tcStatus: 'running' | 'completed' | 'error' =
+            tcRaw.status === 'running' || tcRaw.status === 'error' || tcRaw.status === 'completed'
+              ? tcRaw.status
+              : phase === 'start'
+                ? 'running'
+                : tcRaw.error
+                  ? 'error'
+                  : 'completed';
+          const tcArgs =
+            tcRaw.args ??
+            tcRaw.input ??
+            tcRaw.parameters ??
+            (tcRaw.function?.arguments ? safeParseJson(tcRaw.function.arguments) : undefined);
+          const tcResult = tcRaw.result ?? tcRaw.output ?? tcRaw.response;
+          const tcError = tcRaw.error
+            ? typeof tcRaw.error === 'string'
+              ? tcRaw.error
+              : JSON.stringify(tcRaw.error)
+            : undefined;
+          const tcExitCode = typeof tcRaw.exitCode === 'number' ? tcRaw.exitCode : undefined;
+          const tcDuration = typeof tcRaw.durationMs === 'number' ? tcRaw.durationMs : undefined;
+
+          const now = Date.now();
           setMessages((prev) =>
             upsertStreamingAssistantMessage(prev, runId, (msg) => {
               const existing = msg.toolCalls || [];
-              const idx = existing.findIndex((item) => item.id === tc.id);
+              const idx = existing.findIndex((item) => item.id === tcId);
+
+              let itemToStore: ToolCallItem;
+              if (idx >= 0) {
+                const prevItem = existing[idx];
+                const startedAt = prevItem.startedAt ?? (tcStatus === 'running' ? now : undefined);
+                let durationMs = tcDuration ?? prevItem.durationMs;
+                if (!durationMs && startedAt && (tcStatus === 'completed' || tcStatus === 'error')) {
+                  durationMs = Math.max(0, now - startedAt);
+                }
+                itemToStore = {
+                  ...prevItem,
+                  id: tcId,
+                  name: tcName || prevItem.name,
+                  status: tcStatus,
+                  args: tcArgs !== undefined ? tcArgs : prevItem.args,
+                  result: tcResult !== undefined ? tcResult : prevItem.result,
+                  error: tcError !== undefined ? tcError : prevItem.error,
+                  exitCode: tcExitCode !== undefined ? tcExitCode : prevItem.exitCode,
+                  startedAt,
+                  endedAt:
+                    tcStatus === 'completed' || tcStatus === 'error' ? now : prevItem.endedAt,
+                  durationMs,
+                };
+              } else {
+                const startedAt = tcStatus === 'running' ? now : undefined;
+                itemToStore = {
+                  id: tcId,
+                  name: tcName,
+                  status: tcStatus,
+                  args: tcArgs,
+                  result: tcResult,
+                  error: tcError,
+                  exitCode: tcExitCode,
+                  startedAt,
+                  endedAt: tcStatus === 'completed' || tcStatus === 'error' ? now : undefined,
+                  durationMs: tcDuration,
+                };
+              }
+
               const nextTools =
                 idx >= 0
-                  ? existing.map((item, i) => (i === idx ? { ...item, ...tc } : item))
-                  : [...existing, tc];
+                  ? existing.map((item, i) => (i === idx ? itemToStore : item))
+                  : [...existing, itemToStore];
               return { ...msg, toolCalls: nextTools };
             })
           );
@@ -1244,6 +1387,7 @@ export default function App() {
           ? extractMessageText(payload.message.content ?? payload.message.text)
           : '';
         const incomingAtts = payload.message ? extractMessageAttachments(payload.message) : [];
+        const incomingTools = payload.message ? extractToolCallsFromRaw(payload.message) : [];
         const deltaText = typeof payload.delta === 'string' ? payload.delta : '';
 
         if (state === 'error' || payload.error) {
@@ -1264,10 +1408,29 @@ export default function App() {
         setMessages((prev) =>
           upsertStreamingAssistantMessage(prev, runId, (msg) => {
             const nextContent = fullTextFromMessage ? fullTextFromMessage : msg.content + deltaText;
+            let nextTools = msg.toolCalls;
+            if (incomingTools.length > 0) {
+              const merged = [...(msg.toolCalls || [])];
+              for (const inc of incomingTools) {
+                const mIdx = merged.findIndex((t) => t.id === inc.id);
+                if (mIdx >= 0) {
+                  merged[mIdx] = { ...merged[mIdx], ...inc };
+                } else {
+                  merged.push(inc);
+                }
+              }
+              nextTools = merged;
+            }
+            if (isFinal && nextTools && nextTools.length > 0) {
+              nextTools = nextTools.map((t) =>
+                t.status === 'running' ? { ...t, status: 'completed' as const } : t
+              );
+            }
             return {
               ...msg,
               content: nextContent,
               ...(incomingAtts.length > 0 ? { attachments: incomingAtts } : {}),
+              ...(nextTools && nextTools.length > 0 ? { toolCalls: nextTools } : {}),
               streaming: !isFinal,
             };
           })
@@ -1460,22 +1623,119 @@ export default function App() {
       if (reqSeq !== chatHistorySeqRef.current || scrollKey !== activeGatewaySessionKeyRef.current)
         return;
       const rawMessages = Array.isArray(res?.messages) ? res.messages : [];
+
+      // Pre-scan tool results map across messages (handles OpenAI tool role & Anthropic tool_result blocks)
+      const toolResultsMap = new Map<
+        string,
+        { result?: any; error?: string; status?: 'completed' | 'error'; exitCode?: number }
+      >();
+
+      for (const m of rawMessages) {
+        if (m?.role === 'tool' || m?.role === 'tool_result') {
+          const callId = String(m.tool_call_id || m.tool_use_id || m.id || '');
+          if (callId) {
+            const isErr = Boolean(m.is_error || m.error);
+            const content = m.content ?? m.text ?? m.result ?? m.output;
+            toolResultsMap.set(callId, {
+              result: isErr ? undefined : content,
+              error: isErr
+                ? typeof content === 'string'
+                  ? content
+                  : JSON.stringify(content)
+                : undefined,
+              status: isErr ? 'error' : 'completed',
+              exitCode: typeof m.exitCode === 'number' ? m.exitCode : undefined,
+            });
+          }
+        }
+        if (Array.isArray(m?.content)) {
+          for (const part of m.content) {
+            if (part?.type === 'tool_result') {
+              const callId = String(part.tool_use_id || part.id || '');
+              if (callId) {
+                const isErr = Boolean(part.is_error || part.error);
+                const resContent = part.content ?? part.result ?? part.output;
+                toolResultsMap.set(callId, {
+                  result: isErr ? undefined : resContent,
+                  error: isErr
+                    ? typeof resContent === 'string'
+                      ? resContent
+                      : JSON.stringify(resContent)
+                    : undefined,
+                  status: isErr ? 'error' : 'completed',
+                  exitCode: typeof part.exitCode === 'number' ? part.exitCode : undefined,
+                });
+              }
+            }
+          }
+        }
+      }
+
       const mapped: ChatMessage[] = rawMessages
         .map((m: any, idx: number) => {
           const attachments = extractMessageAttachments(m);
+          const toolCalls = extractToolCallsFromRaw(m);
+
+          // Merge any matching results into toolCalls
+          for (const tc of toolCalls) {
+            if (toolResultsMap.has(tc.id)) {
+              const resInfo = toolResultsMap.get(tc.id)!;
+              if (tc.result === undefined && resInfo.result !== undefined) {
+                tc.result = resInfo.result;
+              }
+              if (!tc.error && resInfo.error) {
+                tc.error = resInfo.error;
+              }
+              if (resInfo.status) {
+                tc.status = resInfo.status;
+              }
+              if (tc.exitCode === undefined && resInfo.exitCode !== undefined) {
+                tc.exitCode = resInfo.exitCode;
+              }
+            }
+          }
+
+          // If this is a standalone tool message whose result was already merged into an assistant message,
+          // skip it to prevent duplicate blank message bubbles.
+          const callId = String(m.tool_call_id || m.tool_use_id || '');
+          if ((m.role === 'tool' || m.role === 'tool_result') && callId && toolResultsMap.has(callId)) {
+            const alreadyClaimed = rawMessages.some(
+              (other: any) =>
+                other !== m &&
+                (other.toolCalls || other.tool_calls || Array.isArray(other.content)) &&
+                extractToolCallsFromRaw(other).some((tc) => tc.id === callId)
+            );
+            if (alreadyClaimed) {
+              return null;
+            }
+          }
+
+          const role =
+            m.role === 'user' || m.role === 'assistant' || m.role === 'system'
+              ? m.role
+              : m.role === 'tool' || m.role === 'tool_result'
+                ? 'system'
+                : 'assistant';
+
           return {
             id: m.id || `hist-${idx}-${Date.now()}`,
-            role: (m.role === 'user' || m.role === 'assistant' || m.role === 'system'
-              ? m.role
-              : 'assistant') as 'user' | 'assistant' | 'system',
+            role: role as 'user' | 'assistant' | 'system',
             content: extractMessageText(m.content ?? m.text ?? ''),
-            thinking: m.thinking || undefined,
+            thinking: extractThinkingText(m) || undefined,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
             attachments: attachments.length > 0 ? attachments : undefined,
             timestamp: m.timestamp || m.ts || Date.now(),
           };
         })
         .filter(
-          (m: ChatMessage) => m.content || m.thinking || (m.attachments && m.attachments.length > 0)
+          (m: ChatMessage | null): m is ChatMessage =>
+            Boolean(
+              m &&
+                (m.content ||
+                  m.thinking ||
+                  (m.attachments && m.attachments.length > 0) ||
+                  (m.toolCalls && m.toolCalls.length > 0))
+            )
         );
       if (!visitedSessionsRef.current.has(scrollKey)) {
         visitedSessionsRef.current.add(scrollKey);
@@ -3195,51 +3455,9 @@ export default function App() {
                     )}
 
                     {m.toolCalls && m.toolCalls.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div className="tool-calls-container">
                         {m.toolCalls.map((tc) => (
-                          <div key={tc.id} className="tool-box">
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                fontWeight: 600,
-                                color: 'var(--text-success)',
-                              }}
-                            >
-                              <span
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                              >
-                                <Wrench size={13} /> {tc.name}
-                              </span>
-                              <span style={{ fontSize: '11px' }}>{tc.status || 'completed'}</span>
-                            </div>
-                            {tc.args && (
-                              <pre
-                                style={{
-                                  marginTop: '4px',
-                                  fontSize: '11px',
-                                  color: 'var(--text-muted)',
-                                  overflowX: 'auto',
-                                }}
-                              >
-                                {typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args)}
-                              </pre>
-                            )}
-                            {tc.result && (
-                              <div
-                                style={{
-                                  marginTop: '4px',
-                                  fontSize: '11.5px',
-                                  color: 'var(--text-success)',
-                                }}
-                              >
-                                {typeof tc.result === 'string'
-                                  ? tc.result
-                                  : JSON.stringify(tc.result)}
-                              </div>
-                            )}
-                          </div>
+                          <ToolCallCard key={tc.id} toolCall={tc} />
                         ))}
                       </div>
                     )}

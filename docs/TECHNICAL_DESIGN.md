@@ -279,6 +279,25 @@ OpenClaw Gateways expose two tiers of file APIs depending on server version and 
    - `src/styles.css` uses system sans-serif and monospace font stacks (`--font-sans` and `--font-mono`) **without** `-webkit-font-smoothing: antialiased`. On Windows Chromium/WebView2, `-webkit-font-smoothing: antialiased` disables ClearType RGB subpixel rendering and forces softer grayscale anti-aliasing.
    - `src-tauri/build.rs` embeds `<dpiAware>true/pm</dpiAware>` and `<dpiAwareness>PerMonitorV2, PerMonitor</dpiAwareness>` into the PE executable manifest so Windows never bitmap-scales the window on 125% / 150% / 200% displays.
 
+### 4.3 Visual Tool Call Telemetry & Execution Cards (`ToolCallCard.tsx`)
+
+YAOC presents tool invocations (shell commands, file reads/writes, web browsing, and custom tool executions) as structured, telemetry-rich interactive cards instead of raw terminal dumps or plain text logs:
+
+1. **Rich Tool Call Data Model (`src/types.ts` - `ToolCallItem`):**
+   - Each tool item records `id`, `name`, `args`, `result`, `error`, `exitCode`, `status` (`"running" | "completed" | "error"`), `startedAt`, `endedAt`, and calculated `durationMs`.
+2. **History Reconstruction & Correlation (`loadChatHistory` in `src/App.tsx`):**
+   - When loading history from `chat.history`, assistant messages containing tool calls (either via direct `toolCalls` payloads, OpenAI tool call arrays, or Anthropic `tool_use` content blocks) are extracted with initial arguments and status.
+   - Subsequent `tool_result` blocks or `role: "tool"` messages are correlated by tool call ID or sequential FIFO fallback, populating `result`, `error`, `exitCode`, and completion state across session reloads.
+3. **Live Streaming Telemetry (`agent` & `chat` events):**
+   - Live `agent` tool start and completion frames track execution duration (`startedAt`, `endedAt`, and millisecond `durationMs`).
+   - Incremental output chunks from `chat` deltas update the card in real-time while displaying a pulsing running badge.
+4. **Interactive Component UI (`src/ToolCallCard.tsx` & `src/styles.css`):**
+   - **Header & Category Badges:** Categorized into Shell (`Terminal`), File (`FileText`), Web (`Globe`), or Other (`Cpu`/`Wrench`), with category-specific color tokens in both dark and light modes.
+   - **Argument Teaser:** Displays a truncated single-line teaser of the primary parameter (e.g. command string, file path, or search query) directly in the card header for rapid scanning.
+   - **Status & Duration Pills:** Shows formatted elapsed execution time (e.g. `45ms`, `1.50s`, `1.1m`) and completion or error status with exit codes.
+   - **Collapsible Argument & Result Views:** Arguments and outputs are individually inspected in clean preformatted code sections with dedicated one-click copy buttons for shell commands, file paths, parameters, and full outputs.
+
+
 ---
 
 ## 5. Build & Cross-Compilation Guide (x64 & ARM64)

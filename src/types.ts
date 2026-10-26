@@ -54,6 +54,11 @@ export interface ToolCallItem {
   status?: 'running' | 'completed' | 'error';
   args?: any;
   result?: any;
+  error?: string;
+  exitCode?: number;
+  durationMs?: number;
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export interface ChatAttachmentItem {
