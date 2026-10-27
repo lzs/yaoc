@@ -213,6 +213,13 @@ async function openApp(browser, options = {}) {
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await page.locator('.message-body').waitFor();
+      assert.equal(
+        await page
+          .locator('.sidebar')
+          .getByText(/win32|x86_64/)
+          .count(),
+        0
+      );
       assert.equal(await page.evaluate(() => Boolean(window.injected)), false);
       assert.equal(
         await page.locator('.message-body script, .message-body a[href^="javascript:"]').count(),
@@ -239,6 +246,32 @@ async function openApp(browser, options = {}) {
       await draftInput.fill('');
       await page.keyboard.press('Control+,');
       await page.getByRole('tab', { name: 'General', exact: true }).click();
+      const activeChat = await page.locator('.session-item.active .session-key').innerText();
+      // Navigate from a form control too, rather than requiring focus on a tab.
+      await page.locator('#theme-select').focus();
+      for (const tab of ['Gateway Profiles', 'Shortcuts', 'About', 'General']) {
+        await page.keyboard.press('Control+PageDown');
+        assert.equal(
+          await page.getByRole('tab', { name: tab, exact: true }).getAttribute('aria-selected'),
+          'true'
+        );
+        assert.equal(
+          await page
+            .getByRole('tab', { name: tab, exact: true })
+            .evaluate((el) => el === document.activeElement),
+          true
+        );
+        assert.equal(
+          await page.locator('.session-item.active .session-key').innerText(),
+          activeChat
+        );
+      }
+      await page.keyboard.press('Control+PageUp');
+      await page
+        .getByRole('tabpanel', { name: 'About', exact: true })
+        .getByText('Platform / Arch', { exact: true })
+        .waitFor();
+      await page.keyboard.press('Control+PageDown');
       await page.locator('#global-hotkey-recorder').waitFor();
       assert.equal(await page.getByText('Build & Version Info', { exact: true }).count(), 0);
       await page.getByRole('tab', { name: 'General', exact: true }).focus();

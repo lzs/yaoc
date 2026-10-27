@@ -14,13 +14,31 @@ const groups = [
       ],
       ['Show keyboard shortcuts', 'Ctrl+/', 'Open this shortcut reference.'],
       ['Open Settings', 'Ctrl+,', 'Configure Gateway profiles, appearance, and notifications.'],
+      [
+        'Previous Settings tab',
+        'Ctrl+PageUp',
+        'While Settings is open, switch to the previous tab. Wraps from the first to the last.',
+      ],
+      [
+        'Next Settings tab',
+        'Ctrl+PageDown',
+        'While Settings is open, switch to the next tab. Wraps from the last to the first.',
+      ],
     ],
   },
   {
     title: 'Chat and sessions',
     shortcuts: [
-      ['Previous session', 'Ctrl+PageUp', 'Move through the sessions in the sidebar.'],
-      ['Next session', 'Ctrl+PageDown', 'Wraps to the first session after the last one.'],
+      [
+        'Previous session',
+        'Ctrl+PageUp',
+        'When Settings is closed, move to the previous session in the sidebar.',
+      ],
+      [
+        'Next session',
+        'Ctrl+PageDown',
+        'When Settings is closed, move to the next session. Wraps after the last one.',
+      ],
       ['Send a message', 'Enter', 'Send the message when the agent is ready.'],
       ['Insert a new line', 'Shift+Enter', 'Continue writing without sending.'],
       [

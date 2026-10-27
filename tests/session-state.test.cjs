@@ -435,7 +435,30 @@ async function event(sessionKey, state, extra = {}) {
     assert.equal(press('PageDown', overrides), false);
     assert.equal(view.selectedSessionKey, key('main'));
   }
-  for (const setter of ['setShowProfileModal', 'setShowQuitConfirmModal', 'setIsRecordingHotkey']) {
+  view.setShowProfileModal(true);
+  render();
+  for (const tab of ['gateway', 'shortcuts', 'about', 'general']) {
+    assert.equal(press('PageDown'), true);
+    assert.equal(view.settingsTab, tab);
+    assert.equal(view.selectedSessionKey, key('main'), 'Settings navigation must not switch chats');
+    assert.equal(view.composerText, 'keyboard draft A');
+  }
+  press('PageUp');
+  assert.equal(view.settingsTab, 'about', 'Previous Settings tab wraps to the last tab');
+  for (const overrides of [
+    { ctrlKey: false },
+    { shiftKey: true },
+    { altKey: true },
+    { metaKey: true },
+    { isComposing: true },
+    { defaultPrevented: true },
+  ]) {
+    assert.equal(press('PageDown', overrides), false);
+    assert.equal(view.settingsTab, 'about');
+  }
+  view.setShowProfileModal(false);
+  render();
+  for (const setter of ['setShowQuitConfirmModal', 'setIsRecordingHotkey']) {
     view[setter](true);
     render();
     assert.equal(press('PageDown'), false);
@@ -452,6 +475,12 @@ async function event(sessionKey, state, extra = {}) {
   view.setSessions([]);
   render();
   assert.equal(press('PageUp'), false);
+  view.setShowProfileModal(true);
+  render();
+  assert.equal(press('PageDown'), true, 'Settings tab navigation works without chat sessions');
+  assert.equal(view.settingsTab, 'general');
+  view.setShowProfileModal(false);
+  render();
   console.log(
     'PASS: Ctrl+Page Up/Down order, wraparound, drafts, modifiers, modal guards, and empty/single session lists'
   );

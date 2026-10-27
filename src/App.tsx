@@ -63,6 +63,7 @@ import KeyboardShortcuts from './KeyboardShortcuts';
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
 
 const UI_STATE_STORAGE_KEY = 'openclaw.uiState.v1';
+const SETTINGS_TABS = ['general', 'gateway', 'shortcuts', 'about'] as const;
 
 function loadLocalUiState(): UiSessionState {
   try {
@@ -2470,12 +2471,20 @@ export default function App() {
         if (
           e.defaultPrevented ||
           e.isComposing ||
-          showProfileModal ||
           showQuitConfirmModal ||
           lightboxImage ||
           renamingSessionKey
         )
           return;
+        if (showProfileModal) {
+          e.preventDefault();
+          const offset = e.key === 'PageDown' ? 1 : -1;
+          const index = SETTINGS_TABS.indexOf(settingsTab);
+          const next = SETTINGS_TABS[(index + offset + SETTINGS_TABS.length) % SETTINGS_TABS.length];
+          setSettingsTab(next);
+          settingsDialogRef.current?.querySelector<HTMLElement>(`#settings-tab-${next}`)?.focus();
+          return;
+        }
         if (sessions.length === 0) return;
         e.preventDefault();
         const current = sessions.findIndex((session) => session.key === selectedSessionKey);
@@ -2569,6 +2578,7 @@ export default function App() {
     selectedAgentId,
     connStatus.state,
     showQuickSwitcher,
+    settingsTab,
   ]);
 
   function openKeyboardShortcuts() {
@@ -3164,7 +3174,6 @@ export default function App() {
                 <Cpu size={13} />
                 <span>{__APP_VERSION_LABEL__}</span>
               </span>
-              <span>{sysInfo ? `${sysInfo.platform}/${sysInfo.arch}` : 'win32'}</span>
             </div>
           </div>
         </aside>
@@ -4374,7 +4383,7 @@ export default function App() {
                 aria-label="Settings categories"
                 aria-orientation="vertical"
               >
-                {(['general', 'gateway', 'shortcuts', 'about'] as const).map((tab, index, tabs) => (
+                {SETTINGS_TABS.map((tab, index, tabs) => (
                   <button
                     key={tab}
                     id={`settings-tab-${tab}`}
