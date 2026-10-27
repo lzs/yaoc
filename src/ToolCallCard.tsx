@@ -115,9 +115,7 @@ export function ToolCallCard({ toolCall }: { toolCall: ToolCallItem }) {
   const handleCopyArgs = (e: React.MouseEvent) => {
     e.stopPropagation();
     const textToCopy =
-      typeof toolCall.args === 'string'
-        ? toolCall.args
-        : JSON.stringify(toolCall.args, null, 2);
+      typeof toolCall.args === 'string' ? toolCall.args : JSON.stringify(toolCall.args, null, 2);
     navigator.clipboard.writeText(textToCopy);
     setCopiedArgs(true);
     setTimeout(() => setCopiedArgs(false), 1600);
@@ -201,9 +199,7 @@ export function ToolCallCard({ toolCall }: { toolCall: ToolCallItem }) {
             <span className="tool-status-pill error">
               <AlertCircle size={11} />
               <span>
-                {typeof toolCall.exitCode === 'number'
-                  ? `exit ${toolCall.exitCode}`
-                  : 'failed'}
+                {typeof toolCall.exitCode === 'number' ? `exit ${toolCall.exitCode}` : 'failed'}
               </span>
             </span>
           )}

@@ -116,10 +116,7 @@ test('extractThinkingText handles both string and content block forms', () => {
       { type: 'text', text: 'Answer' },
     ],
   };
-  assert.equal(
-    sandbox.exports.extractThinking(blockMsg),
-    'Step 1: plan\nStep 2: execute'
-  );
+  assert.equal(sandbox.exports.extractThinking(blockMsg), 'Step 1: plan\nStep 2: execute');
 
   // None
   assert.equal(sandbox.exports.extractThinking({ content: 'Just text' }), undefined);
@@ -146,7 +143,10 @@ test('ToolCallCard helper extracts primary argument summary', () => {
   // Command preview
   assert.equal(sandbox.exports.extractArg({ command: 'cargo test --lib' }), 'cargo test --lib');
   assert.equal(sandbox.exports.extractArg({ path: 'src/main.rs' }), 'src/main.rs');
-  assert.equal(sandbox.exports.extractArg({ query: 'openclaw gateway protocol' }), 'openclaw gateway protocol');
+  assert.equal(
+    sandbox.exports.extractArg({ query: 'openclaw gateway protocol' }),
+    'openclaw gateway protocol'
+  );
   assert.equal(sandbox.exports.extractArg('echo hello'), 'echo hello');
 
   // Duration formatting

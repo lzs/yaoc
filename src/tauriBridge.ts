@@ -95,14 +95,13 @@ export function initTauriBridge(): void {
           if (!disposed) {
             callback(evt.payload);
           }
-        })
-          .then((fn) => {
-            if (disposed) {
-              fn();
-            } else {
-              unlisten = fn;
-            }
-          });
+        }).then((fn) => {
+          if (disposed) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        });
       }
       return () => {
         disposed = true;
@@ -118,14 +117,13 @@ export function initTauriBridge(): void {
           if (!disposed) {
             callback(evt.payload);
           }
-        })
-          .then((fn) => {
-            if (disposed) {
-              fn();
-            } else {
-              unlisten = fn;
-            }
-          });
+        }).then((fn) => {
+          if (disposed) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        });
       }
       return () => {
         disposed = true;

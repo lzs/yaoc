@@ -42,6 +42,7 @@ import {
 } from './types';
 
 import { applyTheme, loadTheme, saveTheme, Theme } from './theme';
+import AgentSwitcher from './AgentSwitcher';
 import SessionModelSwitcher from './SessionModelSwitcher';
 import {
   normalizeSessions,
@@ -233,10 +234,7 @@ function sanitizeImagePreviewUrl(
   }
   if (typeof rawUrl === 'string' && rawUrl.trim()) {
     const trimmed = rawUrl.trim();
-    if (
-      SAFE_DATA_IMAGE_URL_RE.test(trimmed) ||
-      trimmed.startsWith('blob:')
-    ) {
+    if (SAFE_DATA_IMAGE_URL_RE.test(trimmed) || trimmed.startsWith('blob:')) {
       return trimmed;
     }
   }
@@ -1344,7 +1342,11 @@ export default function App() {
                 const prevItem = existing[idx];
                 const startedAt = prevItem.startedAt ?? (tcStatus === 'running' ? now : undefined);
                 let durationMs = tcDuration ?? prevItem.durationMs;
-                if (!durationMs && startedAt && (tcStatus === 'completed' || tcStatus === 'error')) {
+                if (
+                  !durationMs &&
+                  startedAt &&
+                  (tcStatus === 'completed' || tcStatus === 'error')
+                ) {
                   durationMs = Math.max(0, now - startedAt);
                 }
                 itemToStore = {
@@ -1714,7 +1716,11 @@ export default function App() {
           // If this is a standalone tool message whose result was already merged into an assistant message,
           // skip it to prevent duplicate blank message bubbles.
           const callId = String(m.tool_call_id || m.tool_use_id || '');
-          if ((m.role === 'tool' || m.role === 'tool_result') && callId && toolResultsMap.has(callId)) {
+          if (
+            (m.role === 'tool' || m.role === 'tool_result') &&
+            callId &&
+            toolResultsMap.has(callId)
+          ) {
             const alreadyClaimed = rawMessages.some(
               (other: any) =>
                 other !== m &&
@@ -1743,15 +1749,14 @@ export default function App() {
             timestamp: m.timestamp || m.ts || Date.now(),
           };
         })
-        .filter(
-          (m: ChatMessage | null): m is ChatMessage =>
-            Boolean(
-              m &&
-                (m.content ||
-                  m.thinking ||
-                  (m.attachments && m.attachments.length > 0) ||
-                  (m.toolCalls && m.toolCalls.length > 0))
-            )
+        .filter((m: ChatMessage | null): m is ChatMessage =>
+          Boolean(
+            m &&
+            (m.content ||
+              m.thinking ||
+              (m.attachments && m.attachments.length > 0) ||
+              (m.toolCalls && m.toolCalls.length > 0))
+          )
         );
       if (!visitedSessionsRef.current.has(scrollKey)) {
         visitedSessionsRef.current.add(scrollKey);
@@ -2544,7 +2549,10 @@ export default function App() {
     activeGatewaySessionKeyRef.current = gatewayKey;
     uiStateRef.current = { ...uiStateRef.current, selectedSessionKey: gatewayKey };
     setSelectedSessionKey(gatewayKey);
-    if (connStatus.state === 'connected' && (isDifferent || loadedSessionKeyRef.current !== gatewayKey)) {
+    if (
+      connStatus.state === 'connected' &&
+      (isDifferent || loadedSessionKeyRef.current !== gatewayKey)
+    ) {
       loadChatHistory(gatewayKey);
     }
     if (focusComposer) {
@@ -2745,23 +2753,16 @@ export default function App() {
               <span>Active Agent</span>
               <Bot size={13} />
             </div>
-            <select
-              className="select-field"
-              value={selectedAgentId}
-              onChange={(e) => {
-                const nextAgent = e.target.value;
+            <AgentSwitcher
+              agents={agents}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={(nextAgent) => {
                 setSelectedAgentId(nextAgent);
                 if (connStatus.state === 'connected') {
                   refreshGatewayState(nextAgent, selectedSessionKey);
                 }
               }}
-            >
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name ? `${a.name} (${a.id})` : a.id}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           <div className="sidebar-section" style={{ borderBottom: 'none', paddingBottom: '4px' }}>
@@ -3364,7 +3365,9 @@ export default function App() {
                         lineHeight: 1.4,
                       }}
                     >
-                      ⚠️ <strong>Security Risk:</strong> TLS certificate verification is disabled. An attacker on the local network could intercept authentication tokens, passwords, and conversation data. Only use on trusted private networks.
+                      ⚠️ <strong>Security Risk:</strong> TLS certificate verification is disabled.
+                      An attacker on the local network could intercept authentication tokens,
+                      passwords, and conversation data. Only use on trusted private networks.
                     </div>
                   )}
                 </div>
@@ -4271,9 +4274,13 @@ export default function App() {
                       <span className="session-detail-label">Credential Storage</span>
                       <span className="session-detail-value">
                         {sysInfo?.encryptedStorage !== false ? (
-                          <span style={{ color: 'var(--text-accent)' }}>Protected (Windows DPAPI)</span>
+                          <span style={{ color: 'var(--text-accent)' }}>
+                            Protected (Windows DPAPI)
+                          </span>
                         ) : (
-                          <span style={{ color: '#f87171' }}>⚠️ Unencrypted (Non-Windows host)</span>
+                          <span style={{ color: '#f87171' }}>
+                            ⚠️ Unencrypted (Non-Windows host)
+                          </span>
                         )}
                       </span>
                     </div>
@@ -4290,7 +4297,8 @@ export default function App() {
                           lineHeight: 1.4,
                         }}
                       >
-                        ⚠️ Encrypted credential storage is not supported on this platform. Gateway tokens, passwords, and private keys are saved in plaintext.
+                        ⚠️ Encrypted credential storage is not supported on this platform. Gateway
+                        tokens, passwords, and private keys are saved in plaintext.
                       </div>
                     )}
                   </div>
@@ -4443,7 +4451,10 @@ export default function App() {
                               lineHeight: 1.4,
                             }}
                           >
-                            ⚠️ <strong>Security Risk:</strong> TLS certificate verification is disabled. An attacker on the local network could intercept authentication tokens, passwords, and conversation data. Only use on trusted private networks.
+                            ⚠️ <strong>Security Risk:</strong> TLS certificate verification is
+                            disabled. An attacker on the local network could intercept
+                            authentication tokens, passwords, and conversation data. Only use on
+                            trusted private networks.
                           </div>
                         )}
 

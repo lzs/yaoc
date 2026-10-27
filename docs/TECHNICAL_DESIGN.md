@@ -57,6 +57,7 @@ yaoc/
 │   ├── main.tsx                  # Entry point; mounts <App />
 │   ├── types.ts                  # Shared TypeScript interfaces & window.openclawApi contract
 │   ├── models.ts                 # Model list normalization, session key scoping, & sessions.patch helper
+│   ├── AgentSwitcher.tsx         # Custom accessible portal dropdown for switching active Gateway agents
 │   ├── SessionModelSwitcher.tsx  # Per-session LLM model & reasoning effort (thinkingLevel) selector
 │   ├── theme.ts                  # Dark / Light / System theme persistence & OS media query sync
 │   ├── App.tsx                   # Tauri IPC bridge init, application state, RPC orchestration, and UI views
@@ -296,7 +297,6 @@ YAOC presents tool invocations (shell commands, file reads/writes, web browsing,
    - **Argument Teaser:** Displays a truncated single-line teaser of the primary parameter (e.g. command string, file path, or search query) directly in the card header for rapid scanning.
    - **Status & Duration Pills:** Shows formatted elapsed execution time (e.g. `45ms`, `1.50s`, `1.1m`) and completion or error status with exit codes.
    - **Collapsible Argument & Result Views:** Arguments and outputs are individually inspected in clean preformatted code sections with dedicated one-click copy buttons for shell commands, file paths, parameters, and full outputs.
-
 
 ---
 

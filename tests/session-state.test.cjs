@@ -491,7 +491,13 @@ function event(sessionKey, state, extra = {}) {
 
   // Live session sync: test sessions.changed event from Web Control UI / external clients
   view.setSessions([
-    { key: 'main', agentId: 'main', label: 'Primary Session', thinkingLevel: 'low', model: 'sonnet' },
+    {
+      key: 'main',
+      agentId: 'main',
+      label: 'Primary Session',
+      thinkingLevel: 'low',
+      model: 'sonnet',
+    },
     { key: 'other', agentId: 'main', label: 'Other Session', thinkingLevel: 'off' },
   ]);
   render();
@@ -513,7 +519,11 @@ function event(sessionKey, state, extra = {}) {
   });
   render();
   const patchedSession = view.sessions.find((s) => s.key === 'main');
-  assert.equal(patchedSession.thinkingLevel, 'xhigh', 'External thinkingLevel change must update YAOC session');
+  assert.equal(
+    patchedSession.thinkingLevel,
+    'xhigh',
+    'External thinkingLevel change must update YAOC session'
+  );
   assert.equal(patchedSession.model, 'opus', 'External model change must update YAOC session');
 
   // External client resets thinkingLevel to Default (null)
