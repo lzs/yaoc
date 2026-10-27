@@ -605,11 +605,33 @@ export default function App() {
   }
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const sessionListRef = useRef<HTMLDivElement | null>(null);
+  const sessionPopupRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     sessionListRef.current
       ?.querySelector<HTMLElement>('.session-item.active')
       ?.scrollIntoView({ block: 'nearest' });
   }, [selectedSessionKey, sessions]);
+  useLayoutEffect(() => {
+    if (!sessionMenu) return;
+    const el = sessionPopupRef.current;
+    if (!el) return;
+    const updatePosition = () => {
+      const rect = el.getBoundingClientRect();
+      const clampedX = Math.max(8, Math.min(sessionMenu.x, window.innerWidth - rect.width - 8));
+      const clampedY = Math.max(8, Math.min(sessionMenu.y, window.innerHeight - rect.height - 8));
+      el.style.left = `${clampedX}px`;
+      el.style.top = `${clampedY}px`;
+    };
+    updatePosition();
+    const observer =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updatePosition) : null;
+    observer?.observe(el);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [sessionMenu, renamingSessionKey, sessions]);
   useLayoutEffect(() => {
     const input = composerInputRef.current;
     if (!input) return;
@@ -2401,15 +2423,16 @@ export default function App() {
   }, [resizingPane]);
 
   function openSessionMenu(session: SessionInfo, clientX: number, clientY: number) {
-    const menuWidth = 288;
-    const menuHeight = 320;
-    const clampedX = Math.max(8, Math.min(clientX, window.innerWidth - menuWidth - 8));
-    const clampedY = Math.max(8, Math.min(clientY, window.innerHeight - menuHeight - 8));
     setRenamingSessionKey(null);
     setRenameSessionInput(
       (typeof session.label === 'string' && session.label) || getSessionDisplayName(session)
     );
-    setSessionMenu({ sessionKey: session.key, session, x: clampedX, y: clampedY });
+    setSessionMenu({
+      sessionKey: session.key,
+      session,
+      x: Math.max(8, clientX),
+      y: Math.max(8, clientY),
+    });
   }
 
   async function handleResetSession(targetKeyOverride?: string) {
@@ -4580,6 +4603,7 @@ export default function App() {
 
           return (
             <div
+              ref={sessionPopupRef}
               className="session-popup"
               style={{ left: `${sessionMenu.x}px`, top: `${sessionMenu.y}px` }}
               onMouseDown={(e) => e.stopPropagation()}

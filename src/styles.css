@@ -438,6 +438,9 @@ textarea {
   position: fixed;
   z-index: 80;
   width: 280px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  box-sizing: border-box;
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
