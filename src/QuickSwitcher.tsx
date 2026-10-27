@@ -8,6 +8,7 @@ import {
   FileText,
   Folder,
   Layers,
+  Keyboard,
   LogOut,
   MessageSquare,
   Moon,
@@ -52,6 +53,7 @@ interface QuickSwitcherProps {
   onSelectFile: (path: string) => void;
   onNewSession: () => void;
   onOpenSettings: () => void;
+  onOpenKeyboardShortcuts: () => void;
   onToggleWorkspace: () => void;
   onToggleTheme: () => void;
   onClearSession: () => void;
@@ -92,6 +94,7 @@ export default function QuickSwitcher({
   onSelectFile,
   onNewSession,
   onOpenSettings,
+  onOpenKeyboardShortcuts,
   onToggleWorkspace,
   onToggleTheme,
   onClearSession,
@@ -152,6 +155,18 @@ export default function QuickSwitcher({
         onSelect: () => {
           onClose();
           onOpenSettings();
+        },
+      },
+      {
+        id: 'cmd-keyboard-shortcuts',
+        type: 'command',
+        title: 'Show Keyboard Shortcuts',
+        subtitle: 'Learn shortcuts for search, commands, chat, and the workspace',
+        shortcut: 'Ctrl+/',
+        icon: <Keyboard size={16} />,
+        onSelect: () => {
+          onClose();
+          onOpenKeyboardShortcuts();
         },
       },
       {
@@ -276,6 +291,7 @@ export default function QuickSwitcher({
     onClose,
     onNewSession,
     onOpenSettings,
+    onOpenKeyboardShortcuts,
     onToggleWorkspace,
     onToggleTheme,
     onClearSession,

@@ -11,6 +11,7 @@ import {
   Folder,
   FolderOpen,
   Image as ImageIcon,
+  Keyboard,
   MessageSquarePlus,
   MoreHorizontal,
   Plus,
@@ -57,6 +58,7 @@ import {
 import { hasMarkdownSyntax, MarkdownContent } from './markdown';
 import { ToolCallCard } from './ToolCallCard';
 import { RunCompletionTracker } from './runCompletion';
+import KeyboardShortcuts from './KeyboardShortcuts';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
 
@@ -512,7 +514,7 @@ export default function App() {
   );
   const [connStatus, setConnStatus] = useState<ConnectionStatus>({ state: 'disconnected' });
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'gateway' | 'about'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'gateway' | 'shortcuts' | 'about'>('general');
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const settingsDialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -2492,6 +2494,17 @@ export default function App() {
         }
         return;
       }
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey && !e.shiftKey &&
+        (e.key === '/' || e.code === 'Slash')
+      ) {
+        if (e.defaultPrevented || e.isComposing || isRecordingHotkey ||
+            showQuitConfirmModal || lightboxImage || renamingSessionKey) return;
+        e.preventDefault();
+        openKeyboardShortcuts();
+        return;
+      }
       // Quick Switcher (Ctrl+P for search) & Command Palette (Ctrl+Shift+P for commands) — no Ctrl+K
       if (
         (e.ctrlKey || e.metaKey) &&
@@ -2557,6 +2570,13 @@ export default function App() {
     connStatus.state,
     showQuickSwitcher,
   ]);
+
+  function openKeyboardShortcuts() {
+    setShowQuickSwitcher(false);
+    setSettingsTab('shortcuts');
+    setShowProfileModal(true);
+    settingsDialogRef.current?.focus({ preventScroll: true });
+  }
 
   // Drag resize handlers for left sidebar and right workspace panel
   useEffect(() => {
@@ -3118,6 +3138,18 @@ export default function App() {
               color: 'var(--text-muted)',
             }}
           >
+            <button
+              type="button"
+              className="sidebar-shortcuts"
+              onClick={openKeyboardShortcuts}
+              aria-label="Show keyboard shortcuts"
+              aria-keyshortcuts="Control+/"
+              title="Show keyboard shortcuts (Ctrl+/)"
+            >
+              <Keyboard size={15} aria-hidden="true" />
+              <span>Shortcuts</span>
+              <kbd>Ctrl+/</kbd>
+            </button>
             <div
               style={{
                 display: 'flex',
@@ -4342,7 +4374,7 @@ export default function App() {
                 aria-label="Settings categories"
                 aria-orientation="vertical"
               >
-                {(['general', 'gateway', 'about'] as const).map((tab, index, tabs) => (
+                {(['general', 'gateway', 'shortcuts', 'about'] as const).map((tab, index, tabs) => (
                   <button
                     key={tab}
                     id={`settings-tab-${tab}`}
@@ -4372,7 +4404,7 @@ export default function App() {
                       ? 'General'
                       : tab === 'gateway'
                         ? 'Gateway Profiles'
-                        : 'About'}
+                        : tab === 'shortcuts' ? 'Shortcuts' : 'About'}
                   </button>
                 ))}
               </div>
@@ -4696,6 +4728,17 @@ export default function App() {
                     </div>
                   </div>
 
+                </div>
+              )}
+
+              {settingsTab === 'shortcuts' && (
+                <div
+                  className="settings-panel"
+                  id="settings-panel-shortcuts"
+                  role="tabpanel"
+                  aria-labelledby="settings-tab-shortcuts"
+                >
+                  <KeyboardShortcuts globalHotkey={globalHotkey} />
                 </div>
               )}
 
@@ -5342,6 +5385,7 @@ export default function App() {
         onOpenSettings={() => {
           setShowProfileModal(true);
         }}
+        onOpenKeyboardShortcuts={openKeyboardShortcuts}
         onToggleWorkspace={() => {
           setShowWorkspacePane((v) => !v);
         }}

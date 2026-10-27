@@ -218,7 +218,27 @@ async function openApp(browser, options = {}) {
         await page.locator('.message-body script, .message-body a[href^="javascript:"]').count(),
         0
       );
+      await page.getByRole('button', { name: 'Show keyboard shortcuts', exact: true }).click();
+      const shortcuts = page.getByRole('tabpanel', { name: 'Shortcuts', exact: true });
+      await shortcuts.getByText('Ctrl+P', { exact: true }).waitFor();
+      await shortcuts.getByText('Ctrl+Shift+P', { exact: true }).waitFor();
+      await shortcuts.getByText('Alt+Shift+3', { exact: true }).waitFor();
+      await page.keyboard.press('Escape');
+      const draftInput = page.getByRole('textbox', { name: 'Message Assistant', exact: true });
+      await draftInput.fill('Keep this draft?');
+      await page.keyboard.press('Control+/');
+      await shortcuts.waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await draftInput.inputValue(), 'Keep this draft?');
+      await page.keyboard.press('Control+Shift+P');
+      await page.getByPlaceholder('Type a command or action...').fill('>keyboard shortcuts');
+      await page.getByRole('option').filter({ hasText: 'Show Keyboard Shortcuts' }).click();
+      await shortcuts.waitFor();
+      assert.equal(await page.getByRole('dialog', { name: 'Quick Switcher' }).count(), 0);
+      await page.keyboard.press('Escape');
+      await draftInput.fill('');
       await page.keyboard.press('Control+,');
+      await page.getByRole('tab', { name: 'General', exact: true }).click();
       await page.locator('#global-hotkey-recorder').waitFor();
       assert.equal(await page.getByText('Build & Version Info', { exact: true }).count(), 0);
       await page.getByRole('tab', { name: 'General', exact: true }).focus();
@@ -242,6 +262,11 @@ async function openApp(browser, options = {}) {
       await page.keyboard.press('Control+Alt+9');
       await page.getByTitle('Reset to default (Alt+Shift+3)').click();
       assert.equal(await page.evaluate(() => window.testHotkeys.at(-1)), 'Alt+Shift+3');
+      await page.getByRole('button', { name: 'Disable', exact: true }).click();
+      await page.getByRole('tab', { name: 'Shortcuts', exact: true }).click();
+      await shortcuts.getByText('Disabled', { exact: true }).waitFor();
+      await page.getByRole('tab', { name: 'General', exact: true }).click();
+      await page.getByTitle('Reset to default (Alt+Shift+3)').click();
       await page.keyboard.press('Escape');
       const model = page.getByRole('button', { name: 'Session model', exact: true });
       const effort = page.getByRole('button', { name: 'Reasoning effort', exact: true });

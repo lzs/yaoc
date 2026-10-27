@@ -2195,6 +2195,103 @@ textarea {
   margin-top: 4px;
 }
 
+.sidebar-shortcuts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 7px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebar-shortcuts span {
+  flex: 1;
+  text-align: left;
+}
+
+.sidebar-shortcuts:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.sidebar-shortcuts:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.shortcut-row kbd,
+.sidebar-shortcuts kbd {
+  display: inline-block;
+  padding: 3px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.shortcuts-intro h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.shortcuts-group {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.shortcuts-group h5 {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-root);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shortcuts-list {
+  margin: 0;
+  padding: 0 12px;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: 12px;
+}
+
+.shortcut-row + .shortcut-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.shortcut-row dt {
+  font-weight: 600;
+}
+
+.shortcut-row dd {
+  margin: 0;
+}
+
+.shortcut-description {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
 .settings-footer {
   display: flex;
   justify-content: flex-end;

@@ -107,7 +107,7 @@ const source = fs
 const renderStart = source.indexOf('\n  return (', source.indexOf('export default function App()'));
 const testSource =
   source.slice(0, renderStart) +
-  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint, focusComposerInput, composerInputRef }; }`;
+  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint, focusComposerInput, composerInputRef, settingsTab, showProfileModal }; }`;
 const exportsObject = {};
 vm.runInNewContext(compile(testSource), {
   exports: exportsObject,
@@ -455,6 +455,28 @@ async function event(sessionKey, state, extra = {}) {
   console.log(
     'PASS: Ctrl+Page Up/Down order, wraparound, drafts, modifiers, modal guards, and empty/single session lists'
   );
+
+  for (const overrides of [
+    { ctrlKey: false },
+    { altKey: true },
+    { shiftKey: true },
+    { isComposing: true },
+    { defaultPrevented: true },
+  ]) {
+    assert.equal(press('/', overrides), false);
+    assert.equal(view.showProfileModal, false);
+  }
+  view.setIsRecordingHotkey(true);
+  render();
+  assert.equal(press('/'), false, 'Recording a hotkey must not open shortcut help');
+  view.setIsRecordingHotkey(false);
+  render();
+  assert.equal(press('/'), true);
+  assert.equal(view.showProfileModal, true);
+  assert.equal(view.settingsTab, 'shortcuts');
+  view.setShowProfileModal(false);
+  render();
+  console.log('PASS: Ctrl+/ opens shortcut help and respects typing and hotkey-recording guards');
 
   // Security regressions: pairing requestId sanitization, image URL filtering, ws:// warning, and profile-scoped deviceToken
   assert.equal(view.sanitizePairingRequestId('req-123_abc.456:789'), 'req-123_abc.456:789');
