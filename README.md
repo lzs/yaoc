@@ -2,7 +2,9 @@
 
 **Yet Another OpenClaw Chat**, pronounced **yoke**, is an independent Windows desktop client for OpenClaw Gateways. It connects directly over WebSocket and uses the installed Microsoft Edge WebView2 Runtime rather than bundling a browser.
 
-YAOC supports Windows x64 and ARM64. It is not an official OpenClaw application.
+YAOC is a small, lightweight, self-contained desktop client designed to run continuously without noticeable impact on system resources or battery life. It supports Windows x64 and ARM64. YAOC is not an official OpenClaw application.
+
+![YAOC Screenshot](docs/assets/screenshot.png)
 
 ## Features
 
