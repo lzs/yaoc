@@ -17,6 +17,18 @@ if (packageVersion !== tauriVersion || packageVersion !== cargoVersion) {
 console.log(`App metadata versions agree: ${packageVersion}`);
 
 const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json')));
+const cargoLock = fs.readFileSync(path.join(root, 'src-tauri/Cargo.lock'), 'utf8');
+const cargoLockVersion = cargoLock.match(
+  /\[\[package\]\]\r?\nname = "yaoc"\r?\nversion = "([^"]+)"/
+)?.[1];
+if (
+  lock.version !== packageVersion ||
+  lock.packages[''].version !== packageVersion ||
+  cargoLockVersion !== packageVersion
+) {
+  console.error('App lockfile versions must match package metadata.');
+  process.exit(1);
+}
 if (
   manifest.license !== 'MIT' ||
   lock.packages[''].license !== 'MIT' ||

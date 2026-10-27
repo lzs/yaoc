@@ -510,7 +510,7 @@ export default function App() {
   );
   const [connStatus, setConnStatus] = useState<ConnectionStatus>({ state: 'disconnected' });
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'gateway'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'gateway' | 'about'>('general');
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const settingsDialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -4317,7 +4317,7 @@ export default function App() {
                 aria-label="Settings categories"
                 aria-orientation="vertical"
               >
-                {(['general', 'gateway'] as const).map((tab) => (
+                {(['general', 'gateway', 'about'] as const).map((tab, index, tabs) => (
                   <button
                     key={tab}
                     id={`settings-tab-${tab}`}
@@ -4334,15 +4334,20 @@ export default function App() {
                         e.key === 'Home'
                           ? 'general'
                           : e.key === 'End'
-                            ? 'gateway'
-                            : tab === 'general'
-                              ? 'gateway'
-                              : 'general';
+                            ? 'about'
+                            : tabs[
+                                (index + (e.key === 'ArrowDown' ? 1 : tabs.length - 1)) %
+                                  tabs.length
+                              ];
                       setSettingsTab(next);
                       document.getElementById(`settings-tab-${next}`)?.focus();
                     }}
                   >
-                    {tab === 'general' ? 'General' : 'Gateway Profiles'}
+                    {tab === 'general'
+                      ? 'General'
+                      : tab === 'gateway'
+                        ? 'Gateway Profiles'
+                        : 'About'}
                   </button>
                 ))}
               </div>
@@ -4666,6 +4671,16 @@ export default function App() {
                     </div>
                   </div>
 
+                </div>
+              )}
+
+              {settingsTab === 'about' && (
+                <div
+                  className="settings-panel"
+                  id="settings-panel-about"
+                  role="tabpanel"
+                  aria-labelledby="settings-tab-about"
+                >
                   <div
                     style={{
                       background: 'var(--bg-root)',

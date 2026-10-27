@@ -399,6 +399,7 @@ Public build/test commands live in `package.json`. `scripts/package-portable.cjs
 
 ### Project licensing and settings persistence
 
+`vite.config.ts` and `scripts/sync-version.cjs` share the build version across frontend constants, npm/Cargo manifests and lockfiles, and Tauri metadata. Normal builds use `major.minor.patch-devMMDDHHMM`; official builds use `major.minor.patch`. Metadata is stamped after frontend output and before Cargo compilation, so `CARGO_PKG_VERSION` in Gateway identification matches the UI. Both architectures from `dist:all` share one timestamp. Settings has General, Gateway Profiles, and About tabs; About owns the build/version details and Beta / Testing or Official Release badge.
 YAOC is MIT-licensed; npm and Cargo metadata and the root `LICENSE` agree. The metadata check verifies this alongside the app version. Packaging requires the project license and third-party notices before rotating binaries, and includes both files in `release/`. Third-party terms remain separate.
 
 Profile controls update React state; the guarded, debounced settings effect persists changes and reports errors. Direct disconnect persistence uses the same successful-load guard. A failed initial load keeps disk writes disabled, including when profiles are added in Settings.

@@ -201,6 +201,23 @@ async function openApp(browser, options = {}) {
       );
       await page.keyboard.press('Control+,');
       await page.locator('#global-hotkey-recorder').waitFor();
+      assert.equal(await page.getByText('Build & Version Info', { exact: true }).count(), 0);
+      await page.getByRole('tab', { name: 'General', exact: true }).focus();
+      await page.keyboard.press('End');
+      assert.equal(
+        await page.getByRole('tab', { name: 'About', exact: true }).getAttribute('aria-selected'),
+        'true'
+      );
+      const about = page.getByRole('tabpanel', { name: 'About', exact: true });
+      await about.getByText('Build & Version Info', { exact: true }).waitFor();
+      await about.getByText('Beta / Testing', { exact: true }).waitFor();
+      const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'))).version;
+      await about.getByText(appVersion, { exact: true }).waitFor();
+      await page.keyboard.press('ArrowDown');
+      assert.equal(
+        await page.getByRole('tab', { name: 'General', exact: true }).getAttribute('aria-selected'),
+        'true'
+      );
       assert((await page.locator('#global-hotkey-recorder').textContent()).includes('Alt+Shift+3'));
       await page.locator('#global-hotkey-recorder').click();
       await page.keyboard.press('Control+Alt+9');
