@@ -55,6 +55,7 @@ import {
 } from './models';
 import { hasMarkdownSyntax, MarkdownContent } from './markdown';
 import { ToolCallCard } from './ToolCallCard';
+import { RunCompletionTracker } from './runCompletion';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
 
@@ -704,7 +705,6 @@ export default function App() {
   );
   const [testNotifySent, setTestNotifySent] = useState(false);
   const [isChangingModel, setIsChangingModel] = useState(false);
-  const sessionRunIdsRef = useRef(new Map<string, string>());
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -768,6 +768,15 @@ export default function App() {
   const [streamingSessionKeys, setStreamingSessionKeys] = useState<Set<string>>(() => new Set());
   const streamingSessionKeysRef = useRef<Set<string>>(new Set());
   const streamingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const runCompletionRef = useRef<RunCompletionTracker | null>(null);
+  if (!runCompletionRef.current) {
+    runCompletionRef.current = new RunCompletionTracker(
+      async (runId) =>
+        window.openclawApi?.request('agent.wait', { runId, timeoutMs: 30000 }, 40000),
+      markSessionStreaming,
+      notifySessionComplete
+    );
+  }
 
   const isStreaming = streamingSessionKeys.has(
     toGatewaySessionKey(selectedAgentId, selectedSessionKey)
@@ -775,7 +784,6 @@ export default function App() {
 
   function markSessionStreaming(gatewayKey: string, streaming: boolean) {
     if (!gatewayKey) return;
-    if (!streaming) sessionRunIdsRef.current.delete(gatewayKey);
     const prevTimer = streamingTimeoutsRef.current.get(gatewayKey);
     if (prevTimer) {
       clearTimeout(prevTimer);
@@ -787,29 +795,36 @@ export default function App() {
 
       const timer = setTimeout(() => {
         streamingTimeoutsRef.current.delete(gatewayKey);
-        sessionRunIdsRef.current.delete(gatewayKey);
+        if (runCompletionRef.current?.hasConfirmedTracking(gatewayKey)) return;
+        runCompletionRef.current?.cancel(gatewayKey);
         streamingSessionKeysRef.current.delete(gatewayKey);
         setStreamingSessionKeys(new Set(streamingSessionKeysRef.current));
       }, 45000);
       streamingTimeoutsRef.current.set(gatewayKey, timer);
     } else {
-      const wasStreaming = streamingSessionKeysRef.current.has(gatewayKey);
       streamingSessionKeysRef.current.delete(gatewayKey);
       setStreamingSessionKeys(new Set(streamingSessionKeysRef.current));
+      if (gatewayKey === activeGatewaySessionKeyRef.current) {
+        setMessages((prev) =>
+          prev.map((msg) => (msg.streaming ? { ...msg, streaming: false } : msg))
+        );
+      }
+    }
+  }
 
-      if (wasStreaming && (!document.hasFocus() || document.hidden)) {
-        if (notificationsEnabledRef.current) {
-          const matched = sessionsRef.current.find((s) => s.key === gatewayKey);
-          const sessionLabel =
-            matched?.displayName || matched?.label || gatewayKey.replace(/^agent:[^:]+:/, '');
-          window.openclawApi?.showNotification?.(
-            'YAOC - Response Complete',
-            `Agent finished response in ${sessionLabel || 'chat'}`,
-            notificationSoundRef.current
-          );
-        } else if (notificationSoundRef.current) {
-          window.openclawApi?.playNotificationSound?.('info');
-        }
+  function notifySessionComplete(gatewayKey: string) {
+    if (!document.hasFocus() || document.hidden) {
+      if (notificationsEnabledRef.current) {
+        const matched = sessionsRef.current.find((s) => s.key === gatewayKey);
+        const sessionLabel =
+          matched?.displayName || matched?.label || gatewayKey.replace(/^agent:[^:]+:/, '');
+        window.openclawApi?.showNotification?.(
+          'YAOC - Response Complete',
+          `Agent finished response in ${sessionLabel || 'chat'}`,
+          notificationSoundRef.current
+        );
+      } else if (notificationSoundRef.current) {
+        window.openclawApi?.playNotificationSound?.('info');
       }
     }
   }
@@ -1027,7 +1042,7 @@ export default function App() {
       if (status.state !== 'connected') {
         for (const timer of streamingTimeoutsRef.current.values()) clearTimeout(timer);
         streamingTimeoutsRef.current.clear();
-        sessionRunIdsRef.current.clear();
+        runCompletionRef.current?.clear();
         streamingSessionKeysRef.current.clear();
         setStreamingSessionKeys(new Set());
       }
@@ -1378,9 +1393,8 @@ export default function App() {
           });
         }
 
-        if (payload.runId) sessionRunIdsRef.current.set(eventGatewayKey, String(payload.runId));
-
-        if (eventName === 'chat') {
+        const tracked = runCompletionRef.current!.event(eventGatewayKey, eventName, payload);
+        if (!tracked && !runCompletionRef.current!.runId(eventGatewayKey) && eventName === 'chat') {
           const state = payload.state;
           const isFinal = Boolean(
             payload.final ||
@@ -1391,8 +1405,15 @@ export default function App() {
             payload.error
           );
           markSessionStreaming(eventGatewayKey, !isFinal);
-        } else if (eventName === 'agent') {
-          const phase = payload.phase || payload.data?.phase;
+        } else if (
+          !tracked &&
+          !runCompletionRef.current!.runId(eventGatewayKey) &&
+          eventName === 'agent'
+        ) {
+          const phase =
+            (payload.stream || payload.type) === 'lifecycle'
+              ? payload.phase || payload.data?.phase
+              : undefined;
           const isEnded =
             phase === 'end' ||
             phase === 'error' ||
@@ -1603,6 +1624,7 @@ export default function App() {
 
     return () => {
       unsubEvent();
+      runCompletionRef.current?.clear();
       window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
@@ -2151,7 +2173,7 @@ export default function App() {
         );
     }
     await window.openclawApi?.disconnect();
-    sessionRunIdsRef.current.clear();
+    runCompletionRef.current?.clear();
     for (const timer of streamingTimeoutsRef.current.values()) {
       clearTimeout(timer);
     }
@@ -2217,7 +2239,7 @@ export default function App() {
     };
     const activeGatewayKey = toGatewaySessionKey(selectedAgentId, selectedSessionKey);
     markSessionUnread(activeGatewayKey, false);
-    markSessionStreaming(activeGatewayKey, true);
+    const sendToken = runCompletionRef.current!.beginSend(activeGatewayKey);
     setMessages((prev) => [...prev, userMsg]);
     setComposerText('');
     setPendingAttachments([]);
@@ -2248,11 +2270,9 @@ export default function App() {
         },
         45000
       );
-      if (res?.runId && streamingTimeoutsRef.current.has(activeGatewayKey)) {
-        sessionRunIdsRef.current.set(activeGatewayKey, res.runId);
-      }
+      runCompletionRef.current!.acknowledge(activeGatewayKey, sendToken, res?.runId);
     } catch (err: any) {
-      markSessionStreaming(activeGatewayKey, false);
+      runCompletionRef.current!.failSend(activeGatewayKey, sendToken);
       if (activeGatewaySessionKeyRef.current !== activeGatewayKey) return;
       setMessages((prev) => [
         ...prev,
@@ -2269,15 +2289,19 @@ export default function App() {
 
   async function handleAbortRun() {
     const activeGatewayKey = toGatewaySessionKey(selectedAgentId, selectedSessionKey);
+    const runId = runCompletionRef.current!.runId(activeGatewayKey);
+    runCompletionRef.current!.abort(activeGatewayKey, runId);
     try {
       await window.openclawApi?.request('chat.abort', {
         sessionKey: activeGatewayKey,
-        runId: sessionRunIdsRef.current.get(activeGatewayKey) || undefined,
+        runId,
       });
     } catch {
       // Ignore
     } finally {
-      markSessionStreaming(activeGatewayKey, false);
+      if (runCompletionRef.current!.runId(activeGatewayKey) === runId) {
+        runCompletionRef.current!.cancel(activeGatewayKey);
+      }
     }
   }
 
@@ -2646,7 +2670,7 @@ export default function App() {
     visitedSessionsRef.current.delete(gatewayKey);
     sessionScrollTopRef.current.delete(gatewayKey);
     markSessionUnread(gatewayKey, false);
-    markSessionStreaming(gatewayKey, false);
+    runCompletionRef.current!.cancel(gatewayKey);
 
     const remaining = sessions.filter(
       (s) => toGatewaySessionKey(s.agentId || selectedAgentId, s.key) !== gatewayKey

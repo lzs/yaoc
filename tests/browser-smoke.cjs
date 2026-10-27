@@ -34,8 +34,21 @@ async function openApp(browser, options = {}) {
     localStorage.setItem('openclaw.theme.v1', options.theme || 'dark');
     const callbacks = new Set();
     const gatewayCallbacks = new Set();
+    const runWaiters = new Map();
+    const runResults = new Map();
+    window.testFinishRun = (runId, status = 'ok') => {
+      runResults.set(runId, { status });
+      runWaiters.get(runId)?.({ status });
+    };
     window.testEmitGatewayEvent = (frame) => {
       for (const callback of gatewayCallbacks) callback(frame);
+      if (
+        !options.manualRunCompletion &&
+        frame.event === 'chat' &&
+        frame.payload?.state === 'final'
+      ) {
+        window.testFinishRun(frame.payload.runId);
+      }
     };
     let thinkingLevel = 'medium';
     let model = 'provider/model-a';
@@ -173,6 +186,12 @@ async function openApp(browser, options = {}) {
             ],
           };
         if (method === 'chat.send') return { runId: 'test-run' };
+        if (method === 'agent.wait') {
+          return (
+            runResults.get(params.runId) ||
+            new Promise((resolve) => runWaiters.set(params.runId, resolve))
+          );
+        }
         return { ok: true, files: [], entries: [] };
       },
     };
@@ -336,6 +355,63 @@ async function openApp(browser, options = {}) {
       assert.deepEqual(errors, []);
       await page.close();
     }
+    const tracked = await openApp(browser, { manualRunCompletion: true });
+    const trackedComposer = tracked.getByRole('textbox', {
+      name: 'Message Assistant',
+      exact: true,
+    });
+    await trackedComposer.fill('Wait for the whole run');
+    await trackedComposer.press('Enter');
+    await tracked.waitForFunction(() => window.testRequests.some((r) => r.method === 'agent.wait'));
+    await tracked.evaluate(() => {
+      window.testEmitGatewayEvent({
+        event: 'chat',
+        payload: {
+          sessionKey: 'main',
+          runId: 'test-run',
+          state: 'final',
+          message: { content: 'First message' },
+        },
+      });
+      window.testEmitGatewayEvent({
+        event: 'agent',
+        payload: {
+          sessionKey: 'main',
+          runId: 'older-run',
+          stream: 'lifecycle',
+          data: { phase: 'end' },
+        },
+      });
+      window.testEmitGatewayEvent({
+        event: 'chat',
+        payload: { sessionKey: 'main', runId: 'test-run', state: 'delta', delta: 'More work' },
+      });
+    });
+    await tracked.locator('.message-body').filter({ hasText: 'More work' }).waitFor();
+    assert.equal(
+      await tracked.getByRole('button', { name: 'Stop response', exact: true }).isVisible(),
+      true,
+      'Message boundaries and stale ends must keep the current run busy'
+    );
+    await tracked.evaluate(() => window.testFinishRun('test-run'));
+    await tracked.getByRole('button', { name: 'Send message', exact: true }).waitFor();
+    await tracked.evaluate(() =>
+      window.testEmitGatewayEvent({
+        event: 'agent',
+        payload: {
+          sessionKey: 'main',
+          runId: 'test-run',
+          stream: 'lifecycle',
+          data: { phase: 'end' },
+        },
+      })
+    );
+    assert.equal(
+      await tracked.getByRole('button', { name: 'Send message', exact: true }).isVisible(),
+      true
+    );
+    await tracked.close();
+
     const created = await openApp(browser);
     await created.locator('.message-body').waitFor();
     await created.getByTitle('New Session', { exact: true }).click();

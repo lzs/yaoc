@@ -23,11 +23,42 @@ let slots = [],
   listener,
   statusListener;
 const key = (name, agent = 'main') => modelModule.exports.toGatewaySessionKey(agent, name);
+const runModule = { exports: {} };
+vm.runInNewContext(compile(fs.readFileSync('src/runCompletion.ts', 'utf8')), {
+  exports: runModule.exports,
+  setTimeout(callback) {
+    timers.set(++timerId, callback);
+    return timerId;
+  },
+  clearTimeout(id) {
+    timers.delete(id);
+  },
+});
 const requests = [];
+const notifications = [];
+let focused = true;
+const runIds = new Map();
+let runCounter = 0;
+const waiters = new Map();
+function fixtureRun(sessionKey) {
+  const session = key(sessionKey);
+  if (!runIds.has(session)) runIds.set(session, `run-${++runCounter}`);
+  return runIds.get(session);
+}
+async function settle() {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+}
+function finishFixture(runId) {
+  waiters.get(runId)?.({ status: 'ok' });
+}
+
 const keydownListeners = new Set();
 let shortcutCleanup;
-let sendReply = () => Promise.resolve({ runId: 'run-a' });
+let sendReply = (params) => Promise.resolve({ runId: fixtureRun(params.sessionKey) });
 const api = {
+  showNotification(...args) {
+    notifications.push(args);
+  },
   onStatus(callback) {
     statusListener = callback;
     return () => {};
@@ -40,7 +71,9 @@ const api = {
   },
   request(method, params) {
     requests.push({ method, params });
-    return method === 'chat.send' ? sendReply() : Promise.resolve({ messages: [] });
+    if (method === 'agent.wait')
+      return new Promise((resolve) => waiters.set(params.runId, resolve));
+    return method === 'chat.send' ? sendReply(params) : Promise.resolve({ messages: [] });
   },
 };
 const hooks = {
@@ -81,6 +114,7 @@ vm.runInNewContext(compile(testSource), {
   require(name) {
     if (name === 'react') return hooks;
     if (name === './models') return modelModule.exports;
+    if (name === './runCompletion') return runModule.exports;
     if (name === './theme') return { loadTheme: () => 'dark' };
     return {};
   },
@@ -93,7 +127,7 @@ vm.runInNewContext(compile(testSource), {
       if (name === 'keydown') keydownListeners.delete(callback);
     },
   },
-  document: { hasFocus: () => true },
+  document: { hasFocus: () => focused },
   localStorage: { getItem: () => null, setItem() {} },
   setTimeout(callback) {
     timers.set(++timerId, callback);
@@ -118,8 +152,15 @@ function render() {
   )();
   return view;
 }
-function event(sessionKey, state, extra = {}) {
-  listener({ event: 'chat', payload: { sessionKey, state, runId: `run-${sessionKey}`, ...extra } });
+async function event(sessionKey, state, extra = {}) {
+  const runId = fixtureRun(sessionKey);
+  listener({ event: 'chat', payload: { sessionKey, state, runId, ...extra } });
+  await settle();
+  if (['final', 'error', 'aborted'].includes(state)) {
+    finishFixture(runId);
+    runIds.delete(key(sessionKey));
+    await settle();
+  }
   render();
 }
 (async () => {
@@ -145,7 +186,7 @@ function event(sessionKey, state, extra = {}) {
   render();
   await view.handleSendMessage();
   render();
-  event('main', 'final');
+  await event('main', 'final');
   assert.equal(view.isStreaming, true, 'Completion in A must not stop B');
   view.handleSelectSession('main');
   render();
@@ -158,25 +199,35 @@ function event(sessionKey, state, extra = {}) {
   render();
   assert.equal(
     requests.at(-1).params.runId,
-    'run-a',
+    fixtureRun('b'),
     'Abort reads the acknowledged session run ID'
   );
   assert.equal(view.isStreaming, false);
-  event('b', 'delta');
+  runIds.delete(key('b'));
+  await event('b', 'delta');
   listener({
     event: 'agent',
-    payload: { sessionKey: 'b', stream: 'lifecycle', data: { phase: 'end' } },
+    payload: {
+      sessionKey: 'b',
+      runId: fixtureRun('b'),
+      stream: 'lifecycle',
+      data: { phase: 'end' },
+    },
   });
+  finishFixture(fixtureRun('b'));
+  await settle();
+  runIds.delete(key('b'));
   render();
-  assert.equal(view.isStreaming, false, 'Agent lifecycle completion clears busy state');
-  event('b', 'delta');
+  assert.equal(view.isStreaming, false, 'Confirmed agent lifecycle completion clears busy state');
+  await event('b', 'delta');
   for (const callback of [...timers.values()]) callback();
   render();
   assert.equal(
     view.isStreaming,
-    false,
-    'Inactivity fallback clears the composer as well as spinner'
+    true,
+    'Inactivity cannot clear a run while agent.wait is still pending'
   );
+  await event('b', 'final');
   let rejectSend;
   sendReply = () =>
     new Promise((resolve, reject) => {
@@ -195,14 +246,14 @@ function event(sessionKey, state, extra = {}) {
     false
   );
   assert.equal(view.isStreaming, false);
-  event('c', 'delta');
+  await event('c', 'delta');
   statusListener({ state: 'disconnected' });
   render();
   assert.equal(view.isStreaming, false, 'Unexpected connection loss clears all sessions');
   assert.equal(view.streamingSessionKeys.size, 0);
   // Short names and Gateway-qualified events must identify one live conversation.
   view.setConnStatus({ state: 'connected' });
-  sendReply = () => Promise.resolve({ runId: 'run-new' });
+  sendReply = (params) => Promise.resolve({ runId: fixtureRun(params.sessionKey) });
   render();
   view.setNewSessionKeyInput('test-2');
   render();
@@ -222,7 +273,7 @@ function event(sessionKey, state, extra = {}) {
     requests.findLast((request) => request.method === 'chat.send').params.sessionKey,
     'agent:main:test-2'
   );
-  event('agent:main:test-2', 'delta', { delta: 'Immediate reply' });
+  await event('agent:main:test-2', 'delta', { delta: 'Immediate reply' });
   assert(
     view.messages.some(
       (message) => message.role === 'assistant' && message.content === 'Immediate reply'
@@ -235,7 +286,7 @@ function event(sessionKey, state, extra = {}) {
     false,
     'No phantom short-name row'
   );
-  event('agent:main:test-2', 'final', { message: { content: 'Immediate reply' } });
+  await event('agent:main:test-2', 'final', { message: { content: 'Immediate reply' } });
   assert.equal(view.isStreaming, false, 'Qualified terminal event clears the same spinner');
   assert.equal(view.streamingSessionKeys.has('agent:main:test-2'), false);
   view.setComposerText('Keep this draft');
@@ -296,13 +347,13 @@ function event(sessionKey, state, extra = {}) {
     requests.findLast((request) => request.method === 'chat.send').params.sessionKey,
     'agent:main:soclaas'
   );
-  event('agent:main:soclaas', 'delta', { delta: 'Lowercase Gateway reply' });
+  await event('agent:main:soclaas', 'delta', { delta: 'Lowercase Gateway reply' });
   assert(view.messages.some((message) => message.content === 'Lowercase Gateway reply'));
   assert.equal(
     view.sessions.filter((session) => key(session.key) === 'agent:main:soclaas').length,
     1
   );
-  event('agent:main:soclaas', 'final', { message: { content: 'Lowercase Gateway reply' } });
+  await event('agent:main:soclaas', 'final', { message: { content: 'Lowercase Gateway reply' } });
   assert.equal(view.isStreaming, false);
   view.setComposerText('Case-independent draft');
   render();
@@ -323,10 +374,10 @@ function event(sessionKey, state, extra = {}) {
   render();
   view.handleCreateSession();
   render();
-  event('agent:research:test-2', 'delta', { delta: 'Research reply' });
+  await event('agent:research:test-2', 'delta', { delta: 'Research reply' });
   assert(view.messages.some((message) => message.content === 'Research reply'));
   assert.equal(view.selectedSessionKey, 'agent:research:test-2');
-  event('agent:research:test-2', 'final');
+  await event('agent:research:test-2', 'final');
   assert.equal(view.isStreaming, false);
   view.setSelectedAgentId('main');
   view.setConnStatus({ state: 'disconnected' });
@@ -571,6 +622,58 @@ function event(sessionKey, state, extra = {}) {
     'Caret must be placed at the end of the message entry box'
   );
   console.log('PASS: session selection returns focus to message entry box with cursor at end');
+
+  focused = false;
+  view.handleSelectSession('notification-check');
+  view.setConnStatus({ state: 'connected' });
+  render();
+  view.setComposerText('Confirm the entire run');
+  render();
+  await view.handleSendMessage();
+  await settle();
+  const notificationRun = fixtureRun('notification-check');
+  listener({
+    event: 'chat',
+    payload: { sessionKey: 'notification-check', runId: 'old-run', state: 'final' },
+  });
+  listener({
+    event: 'chat',
+    payload: { sessionKey: 'notification-check', runId: notificationRun, state: 'final' },
+  });
+  await settle();
+  render();
+  assert.equal(view.isStreaming, true, 'A final message cannot clear an unconfirmed run');
+  assert.equal(notifications.length, 0, 'No premature response-complete toast');
+  finishFixture(notificationRun);
+  await settle();
+  render();
+  assert.equal(view.isStreaming, false);
+  assert.equal(notifications.length, 1, 'One background notification follows confirmed completion');
+  listener({
+    event: 'agent',
+    payload: {
+      sessionKey: 'notification-check',
+      runId: notificationRun,
+      stream: 'lifecycle',
+      data: { phase: 'end' },
+    },
+  });
+  await settle();
+  assert.equal(notifications.length, 1, 'Duplicate terminal events do not notify twice');
+  view.setComposerText('Cancel this run');
+  runIds.delete(key('notification-check'));
+  render();
+  await view.handleSendMessage();
+  await settle();
+  const cancelledRun = fixtureRun('notification-check');
+  await view.handleAbortRun();
+  finishFixture(cancelledRun);
+  await settle();
+  assert.equal(notifications.length, 1, 'Cancellation does not send a success toast');
+  focused = true;
+  console.log(
+    'PASS: background notifications require confirmed run completion and ignore stale/duplicate/cancelled runs'
+  );
 
   console.log(
     'PASS: session isolation, drafts/attachments, background completion, abort IDs, lifecycle, timeout, delayed failure routing and connection loss'
