@@ -27,6 +27,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_tungstenite::{
     connect_async_tls_with_config,
@@ -1384,6 +1385,200 @@ fn open_external_url(url: String) -> Result<Value, String> {
     Ok(json!({ "ok": true }))
 }
 
+#[tauri::command]
+fn set_taskbar_progress(
+    window: tauri::WebviewWindow,
+    status: Option<String>,
+    progress: Option<u64>,
+) -> Result<(), String> {
+    use tauri::window::{ProgressBarState, ProgressBarStatus};
+
+    log_boot(&format!(
+        "IPC set_taskbar_progress called: status={status:?}, progress={progress:?}"
+    ));
+
+    let status_enum = match status.as_deref() {
+        Some("none") => Some(ProgressBarStatus::None),
+        Some("normal") => Some(ProgressBarStatus::Normal),
+        Some("indeterminate") => Some(ProgressBarStatus::Indeterminate),
+        Some("paused") => Some(ProgressBarStatus::Paused),
+        Some("error") => Some(ProgressBarStatus::Error),
+        None => None,
+        Some(other) => return Err(format!("Unknown progress bar status: {other}")),
+    };
+
+    window
+        .set_progress_bar(ProgressBarState {
+            status: status_enum,
+            progress,
+        })
+        .map_err(|e| {
+            log_boot(&format!("set_taskbar_progress error: {e}"));
+            e.to_string()
+        })
+}
+
+#[tauri::command]
+fn play_notification_sound(sound_type: Option<String>) {
+    log_boot(&format!(
+        "IPC play_notification_sound called: sound_type={sound_type:?}"
+    ));
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBeep(u_type: u32) -> i32;
+        }
+
+        // 0x00000040 = MB_ICONASTERISK (Information / notification chime)
+        // 0x00000030 = MB_ICONEXCLAMATION (Warning)
+        // 0x00000010 = MB_ICONHAND (Critical error)
+        let beep_type = match sound_type.as_deref() {
+            Some("warning") => 0x00000030,
+            Some("critical") | Some("error") => 0x00000010,
+            _ => 0x00000040,
+        };
+        let res = unsafe { MessageBeep(beep_type) };
+        log_boot(&format!(
+            "MessageBeep(0x{beep_type:08x}) returned {res}"
+        ));
+    }
+}
+
+#[tauri::command]
+fn show_notification(
+    app: AppHandle,
+    title: String,
+    body: String,
+    sound: Option<bool>,
+) -> Result<(), String> {
+    log_boot(&format!(
+        "IPC show_notification called: title={title:?}, body={body:?}, sound={sound:?}"
+    ));
+    if sound.unwrap_or(false) {
+        play_notification_sound(None);
+    }
+    match app.notification().builder().title(title).body(body).show() {
+        Ok(()) => {
+            log_boot("show_notification show() succeeded");
+            Ok(())
+        }
+        Err(e) => {
+            log_boot(&format!("show_notification show() error: {e}"));
+            Err(e.to_string())
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn setup_windows_toast_support() {
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
+    }
+
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::process::CommandExt;
+
+    let aumid_wide: Vec<u16> = std::ffi::OsStr::new("ai.openclaw.chat.lite")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let hr = unsafe { SetCurrentProcessExplicitAppUserModelID(aumid_wide.as_ptr()) };
+    log_boot(&format!("SetCurrentProcessExplicitAppUserModelID: 0x{hr:08x}"));
+
+    std::thread::spawn(|| {
+        if let Ok(exe_path) = std::env::current_exe() {
+            let exe_str = exe_path.to_string_lossy();
+            let _ = std::process::Command::new("reg")
+                .args([
+                    "add",
+                    r"HKCU\Software\Classes\AppUserModelId\ai.openclaw.chat.lite",
+                    "/v",
+                    "DisplayName",
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    "YAOC",
+                    "/f",
+                ])
+                .creation_flags(0x08000000)
+                .output();
+            let _ = std::process::Command::new("reg")
+                .args([
+                    "add",
+                    r"HKCU\Software\Classes\AppUserModelId\ai.openclaw.chat.lite",
+                    "/v",
+                    "IconUri",
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    &exe_str,
+                    "/f",
+                ])
+                .creation_flags(0x08000000)
+                .output();
+            let _ = std::process::Command::new("reg")
+                .args([
+                    "add",
+                    r"HKCU\Software\Classes\AppUserModelId\ai.openclaw.chat.lite",
+                    "/v",
+                    "ShowInActionCenter",
+                    "/t",
+                    "REG_DWORD",
+                    "/d",
+                    "1",
+                    "/f",
+                ])
+                .creation_flags(0x08000000)
+                .output();
+
+            let app_data = std::env::var("APPDATA").unwrap_or_default();
+            if !app_data.is_empty() {
+                let shortcut_dir = std::path::PathBuf::from(&app_data)
+                    .join(r"Microsoft\Windows\Start Menu\Programs");
+                let shortcut_path = shortcut_dir.join("YAOC.lnk");
+                if !shortcut_path.exists() {
+                    let ps_script = format!(
+                        r#"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{}'); $s.TargetPath = '{}'; $s.Description = 'YAOC - OpenClaw Chat'; $s.Save()"#,
+                        shortcut_path.display(),
+                        exe_str
+                    );
+                    let _ = std::process::Command::new("powershell")
+                        .args([
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-WindowStyle",
+                            "Hidden",
+                            "-Command",
+                            &ps_script,
+                        ])
+                        .creation_flags(0x08000000)
+                        .output();
+                }
+            }
+        }
+    });
+}
+
+#[tauri::command]
+fn request_attention(window: tauri::WebviewWindow, level: Option<String>) -> Result<(), String> {
+    log_boot(&format!("IPC request_attention called: level={level:?}"));
+    let attention_type = match level.as_deref() {
+        Some("critical") => Some(tauri::UserAttentionType::Critical),
+        Some("informational") | Some("info") => Some(tauri::UserAttentionType::Informational),
+        Some("none") | Some("clear") => None,
+        _ => Some(tauri::UserAttentionType::Informational),
+    };
+    window
+        .request_user_attention(attention_type)
+        .map_err(|e| {
+            log_boot(&format!("request_user_attention error: {e}"));
+            e.to_string()
+        })
+}
+
 // Re-read visibility, minimization, and focus on the main thread after window operations.
 fn refresh_efficiency_mode(app: &AppHandle) {
     let app = app.clone();
@@ -1906,6 +2101,8 @@ fn log_boot(msg: &str) {
 
 fn main() {
     log_boot("main() started");
+    #[cfg(target_os = "windows")]
+    setup_windows_toast_support();
     let gw_state = match GatewayState::new() {
         Ok(state) => Arc::new(state),
         Err(error) => {
@@ -1916,6 +2113,7 @@ fn main() {
     };
     log_boot("GatewayState initialized");
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(gw_state)
         .manage(window_state::WindowState::default())
         .on_window_event(|window, event| {
@@ -1980,7 +2178,11 @@ fn main() {
             gateway_request,
             set_global_hotkey,
             quit_app,
-            open_external_url
+            open_external_url,
+            set_taskbar_progress,
+            show_notification,
+            play_notification_sound,
+            request_attention,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -2222,5 +2424,46 @@ mod tests {
         assert!(!is_allowed("file:///C:/Windows/System32/calc.exe"));
         assert!(!is_allowed("javascript:alert(1)"));
         assert!(!is_allowed("ms-msdt:/id PCWDiagnostic"));
+    }
+
+    #[test]
+    fn taskbar_progress_and_attention_mapping() {
+        use tauri::window::ProgressBarStatus;
+
+        let parse_status = |status: Option<&str>| -> Result<Option<ProgressBarStatus>, String> {
+            match status {
+                Some("none") => Ok(Some(ProgressBarStatus::None)),
+                Some("normal") => Ok(Some(ProgressBarStatus::Normal)),
+                Some("indeterminate") => Ok(Some(ProgressBarStatus::Indeterminate)),
+                Some("paused") => Ok(Some(ProgressBarStatus::Paused)),
+                Some("error") => Ok(Some(ProgressBarStatus::Error)),
+                None => Ok(None),
+                Some(other) => Err(format!("Unknown progress bar status: {other}")),
+            }
+        };
+
+        assert!(matches!(parse_status(Some("none")).unwrap(), Some(ProgressBarStatus::None)));
+        assert!(matches!(parse_status(Some("normal")).unwrap(), Some(ProgressBarStatus::Normal)));
+        assert!(matches!(parse_status(Some("indeterminate")).unwrap(), Some(ProgressBarStatus::Indeterminate)));
+        assert!(matches!(parse_status(Some("paused")).unwrap(), Some(ProgressBarStatus::Paused)));
+        assert!(matches!(parse_status(Some("error")).unwrap(), Some(ProgressBarStatus::Error)));
+        assert!(matches!(parse_status(None).unwrap(), None));
+        assert!(parse_status(Some("invalid")).is_err());
+
+        let parse_attention = |level: Option<&str>| -> Option<tauri::UserAttentionType> {
+            match level {
+                Some("critical") => Some(tauri::UserAttentionType::Critical),
+                Some("informational") | Some("info") => Some(tauri::UserAttentionType::Informational),
+                Some("none") | Some("clear") => None,
+                _ => Some(tauri::UserAttentionType::Informational),
+            }
+        };
+
+        assert_eq!(parse_attention(Some("critical")), Some(tauri::UserAttentionType::Critical));
+        assert_eq!(parse_attention(Some("informational")), Some(tauri::UserAttentionType::Informational));
+        assert_eq!(parse_attention(Some("info")), Some(tauri::UserAttentionType::Informational));
+        assert_eq!(parse_attention(Some("none")), None);
+        assert_eq!(parse_attention(Some("clear")), None);
+        assert_eq!(parse_attention(None), Some(tauri::UserAttentionType::Informational));
     }
 }

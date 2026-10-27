@@ -16,6 +16,41 @@ declare global {
   }
 }
 
+export function playWebAudioChime(soundType?: string): void {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+
+    if (soundType === 'warning' || soundType === 'error' || soundType === 'critical') {
+      // 2-tone descending alert (880Hz -> 587Hz)
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.setValueAtTime(587, now + 0.12);
+    } else {
+      // 2-tone ascending chime (587Hz -> 880Hz)
+      osc.frequency.setValueAtTime(587, now);
+      osc.frequency.setValueAtTime(880, now + 0.12);
+    }
+
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.38);
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 500);
+  } catch {
+    // Ignored in headless/unsupported environments
+  }
+}
+
 export function initTauriBridge(): void {
   if (typeof window === 'undefined') return;
   if (window.openclawApi) return;
@@ -86,6 +121,27 @@ export function initTauriBridge(): void {
 
     openExternalUrl: (url: string) =>
       invokeWithError<{ ok: boolean }>('open_external_url', { url }),
+
+    setTaskbarProgress: (status?: string, progress?: number) =>
+      invokeWithError<void>('set_taskbar_progress', {
+        status: status ?? 'none',
+        progress: typeof progress === 'number' ? Math.round(progress) : null,
+      }),
+
+    showNotification: (title: string, body: string, sound?: boolean) => {
+      if (sound) {
+        playWebAudioChime('info');
+      }
+      return invokeWithError<void>('show_notification', { title, body, sound: sound ?? false });
+    },
+
+    playNotificationSound: (soundType?: string) => {
+      playWebAudioChime(soundType);
+      return invokeWithError<void>('play_notification_sound', { soundType: soundType ?? 'info' });
+    },
+
+    requestAttention: (level?: string) =>
+      invokeWithError<void>('request_attention', { level: level ?? 'informational' }),
 
     onStatus: (callback: (status: ConnectionStatus) => void) => {
       let unlisten: (() => void) | null = null;

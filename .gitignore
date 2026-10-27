@@ -29,6 +29,7 @@ CLAUDE.md
 .agent/
 _agents/
 _agent/
+.local/
 
 # Environment variables & local secrets
 .env

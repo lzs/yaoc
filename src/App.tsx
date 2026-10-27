@@ -554,6 +554,8 @@ export default function App() {
       aId
     );
   });
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const [selectedSessionKey, setSelectedSessionKey] = useState<string>(() =>
     toGatewaySessionKey(
       loadLocalUiState().selectedAgentId || 'main',
@@ -663,10 +665,23 @@ export default function App() {
     const saved = loadLocalUiState();
     return typeof saved.globalHotkey === 'string' ? saved.globalHotkey : 'Alt+Shift+3';
   });
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
+    const saved = loadLocalUiState();
+    return typeof saved.notificationsEnabled === 'boolean' ? saved.notificationsEnabled : true;
+  });
+  const [notificationSound, setNotificationSound] = useState<boolean>(() => {
+    const saved = loadLocalUiState();
+    return typeof saved.notificationSound === 'boolean' ? saved.notificationSound : true;
+  });
+  const notificationsEnabledRef = useRef(notificationsEnabled);
+  notificationsEnabledRef.current = notificationsEnabled;
+  const notificationSoundRef = useRef(notificationSound);
+  notificationSoundRef.current = notificationSound;
   const [isRecordingHotkey, setIsRecordingHotkey] = useState(false);
   const [hotkeyStatusMsg, setHotkeyStatusMsg] = useState<{ text: string; error?: boolean } | null>(
     null
   );
+  const [testNotifySent, setTestNotifySent] = useState(false);
   const [isChangingModel, setIsChangingModel] = useState(false);
   const sessionRunIdsRef = useRef(new Map<string, string>());
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -730,6 +745,7 @@ export default function App() {
   const [rawMessageIds, setRawMessageIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionKeys, setUnreadSessionKeys] = useState<Set<string>>(() => new Set());
   const [streamingSessionKeys, setStreamingSessionKeys] = useState<Set<string>>(() => new Set());
+  const streamingSessionKeysRef = useRef<Set<string>>(new Set());
   const streamingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const isStreaming = streamingSessionKeys.has(
@@ -745,30 +761,35 @@ export default function App() {
       streamingTimeoutsRef.current.delete(gatewayKey);
     }
     if (streaming) {
-      setStreamingSessionKeys((prev) => {
-        if (prev.has(gatewayKey)) return prev;
-        const next = new Set(prev);
-        next.add(gatewayKey);
-        return next;
-      });
+      streamingSessionKeysRef.current.add(gatewayKey);
+      setStreamingSessionKeys(new Set(streamingSessionKeysRef.current));
+
       const timer = setTimeout(() => {
         streamingTimeoutsRef.current.delete(gatewayKey);
         sessionRunIdsRef.current.delete(gatewayKey);
-        setStreamingSessionKeys((prev) => {
-          if (!prev.has(gatewayKey)) return prev;
-          const next = new Set(prev);
-          next.delete(gatewayKey);
-          return next;
-        });
+        streamingSessionKeysRef.current.delete(gatewayKey);
+        setStreamingSessionKeys(new Set(streamingSessionKeysRef.current));
       }, 45000);
       streamingTimeoutsRef.current.set(gatewayKey, timer);
     } else {
-      setStreamingSessionKeys((prev) => {
-        if (!prev.has(gatewayKey)) return prev;
-        const next = new Set(prev);
-        next.delete(gatewayKey);
-        return next;
-      });
+      const wasStreaming = streamingSessionKeysRef.current.has(gatewayKey);
+      streamingSessionKeysRef.current.delete(gatewayKey);
+      setStreamingSessionKeys(new Set(streamingSessionKeysRef.current));
+
+      if (wasStreaming && (!document.hasFocus() || document.hidden)) {
+        if (notificationsEnabledRef.current) {
+          const matched = sessionsRef.current.find((s) => s.key === gatewayKey);
+          const sessionLabel =
+            matched?.displayName || matched?.label || gatewayKey.replace(/^agent:[^:]+:/, '');
+          window.openclawApi?.showNotification?.(
+            'YAOC - Response Complete',
+            `Agent finished response in ${sessionLabel || 'chat'}`,
+            notificationSoundRef.current
+          );
+        } else if (notificationSoundRef.current) {
+          window.openclawApi?.playNotificationSound?.('info');
+        }
+      }
     }
   }
 
@@ -832,6 +853,8 @@ export default function App() {
     workspaceWidth,
     workspaceTreeWidth,
     globalHotkey,
+    notificationsEnabled,
+    notificationSound,
   });
 
   useEffect(() => {
@@ -847,6 +870,8 @@ export default function App() {
       workspaceWidth,
       workspaceTreeWidth,
       globalHotkey,
+      notificationsEnabled,
+      notificationSound,
     };
     uiStateRef.current = nextUiState;
     try {
@@ -881,7 +906,35 @@ export default function App() {
     workspaceWidth,
     workspaceTreeWidth,
     globalHotkey,
+    notificationsEnabled,
+    notificationSound,
   ]);
+
+  // Taskbar Progress & State Ring (Feature 1)
+  useEffect(() => {
+    const api = window.openclawApi;
+    if (!api?.setTaskbarProgress) return;
+
+    if (approvals.length > 0) {
+      api.setTaskbarProgress('paused');
+      api.requestAttention?.('critical');
+    } else if (streamingSessionKeys.size > 0) {
+      api.setTaskbarProgress('indeterminate');
+    } else {
+      api.setTaskbarProgress('none');
+      api.requestAttention?.('none');
+    }
+  }, [approvals.length, streamingSessionKeys.size]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      if (approvals.length === 0) {
+        window.openclawApi?.requestAttention?.('none');
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [approvals.length]);
 
   function copyText(text: string, id: string) {
     navigator.clipboard.writeText(text);
@@ -954,6 +1007,7 @@ export default function App() {
         for (const timer of streamingTimeoutsRef.current.values()) clearTimeout(timer);
         streamingTimeoutsRef.current.clear();
         sessionRunIdsRef.current.clear();
+        streamingSessionKeysRef.current.clear();
         setStreamingSessionKeys(new Set());
       }
       if (status.state === 'connected') {
@@ -1025,6 +1079,18 @@ export default function App() {
               : typeof localUi.globalHotkey === 'string'
                 ? localUi.globalHotkey
                 : 'Alt+Shift+3',
+          notificationsEnabled:
+            typeof fileUi.notificationsEnabled === 'boolean'
+              ? fileUi.notificationsEnabled
+              : typeof localUi.notificationsEnabled === 'boolean'
+                ? localUi.notificationsEnabled
+                : true,
+          notificationSound:
+            typeof fileUi.notificationSound === 'boolean'
+              ? fileUi.notificationSound
+              : typeof localUi.notificationSound === 'boolean'
+                ? localUi.notificationSound
+                : true,
         };
 
         mergedUi.selectedSessionKey = toGatewaySessionKey(
@@ -1035,6 +1101,12 @@ export default function App() {
         if (typeof mergedUi.globalHotkey === 'string') {
           setGlobalHotkey(mergedUi.globalHotkey);
           api.setGlobalHotkey?.(mergedUi.globalHotkey).catch(() => {});
+        }
+        if (typeof mergedUi.notificationsEnabled === 'boolean') {
+          setNotificationsEnabled(mergedUi.notificationsEnabled);
+        }
+        if (typeof mergedUi.notificationSound === 'boolean') {
+          setNotificationSound(mergedUi.notificationSound);
         }
         setAutoConnect(Boolean(mergedUi.autoConnect));
         if (mergedUi.selectedAgentId) {
@@ -1126,13 +1198,34 @@ export default function App() {
           receivedAt: Date.now(),
         };
         setApprovals((prev) => [req, ...prev.filter((x) => x.id !== req.id)]);
+
+        if (notificationsEnabledRef.current) {
+          if (!document.hasFocus() || document.hidden) {
+            api.showNotification?.(
+              'YAOC - Tool Approval Required',
+              `Command: ${req.command.slice(0, 120)}${req.agentId ? ` (${req.agentId})` : ''}`,
+              notificationSoundRef.current
+            );
+          } else if (notificationSoundRef.current) {
+            api.playNotificationSound?.('warning');
+          }
+        } else if (notificationSoundRef.current) {
+          api.playNotificationSound?.('warning');
+        }
+        api.requestAttention?.('critical');
         return;
       }
 
       if (eventName === 'exec.approval.resolved') {
         const resolvedId = payload.id || payload.requestId;
         if (resolvedId) {
-          setApprovals((prev) => prev.filter((x) => x.id !== resolvedId));
+          setApprovals((prev) => {
+            const next = prev.filter((x) => x.id !== resolvedId);
+            if (next.length === 0) {
+              api.requestAttention?.('none');
+            }
+            return next;
+          });
         }
         return;
       }
@@ -2042,6 +2135,7 @@ export default function App() {
       clearTimeout(timer);
     }
     streamingTimeoutsRef.current.clear();
+    streamingSessionKeysRef.current.clear();
     setStreamingSessionKeys(new Set());
   }
 
@@ -4230,6 +4324,76 @@ export default function App() {
                       Toggles the YAOC window from anywhere in Windows. Closing the window hides it
                       to the system tray; press <code>Ctrl+Q</code> in the window or right-click the
                       tray icon to quit completely.
+                    </p>
+                  </div>
+
+                  <div className="form-row">
+                    <label>Windows Desktop Notifications &amp; Sound</label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '2px' }}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          cursor: 'pointer',
+                          fontSize: '12.5px',
+                          color: 'var(--text-normal)',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={notificationsEnabled}
+                          onChange={(e) => setNotificationsEnabled(e.target.checked)}
+                        />
+                        <span>Show Windows toast notifications when YAOC is in the background</span>
+                      </label>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          cursor: 'pointer',
+                          fontSize: '12.5px',
+                          color: 'var(--text-normal)',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={notificationSound}
+                          onChange={(e) => setNotificationSound(e.target.checked)}
+                        />
+                        <span>Play system audio chime (MessageBeep) on alerts</span>
+                      </label>
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{
+                            fontSize: '11.5px',
+                            padding: '4px 10px',
+                            borderColor: testNotifySent ? 'var(--color-primary, #10b981)' : undefined,
+                            color: testNotifySent ? 'var(--color-primary, #10b981)' : undefined,
+                            fontWeight: testNotifySent ? 600 : undefined,
+                          }}
+                          onClick={() => {
+                            setTestNotifySent(true);
+                            setTimeout(() => setTestNotifySent(false), 2500);
+                            window.openclawApi?.showNotification?.(
+                              'YAOC - Test Notification',
+                              'Windows desktop notifications and audio alerts are working properly!',
+                              notificationSound
+                            );
+                            if (!notificationsEnabled && notificationSound) {
+                              window.openclawApi?.playNotificationSound?.('info');
+                            }
+                          }}
+                        >
+                          {testNotifySent ? '✓ Sent Test Alert' : 'Test Notification & Sound'}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="settings-help">
+                      Notifies when agent generations complete or when tool execution approvals are requested while YAOC is unfocused or minimized to tray.
                     </p>
                   </div>
 

@@ -180,6 +180,10 @@ yaoc/
 | `gateway_disconnect` | _(none)_                             | `{ ok: boolean }`                         | Closes the active WebSocket connection and cancels pending requests.                                                                                                             |
 | `gateway_request`    | `method, params, timeoutMs`          | `Value`                                   | Sends an RPC request over the active Gateway connection (or handles it in `handle_mock_rpc`).                                                                                    |
 | `set_global_hotkey`  | `hotkey: String`                     | `{ ok: boolean, hotkey: string }`         | Dynamically unregisters/registers the Windows global shortcut (`RegisterHotKey` on the hotkey thread via `PostThreadMessageW`) and updates the system tray menu label & tooltip. |
+| `set_taskbar_progress`| `status: String, progress?: u32`    | `{ ok: boolean }`                         | Updates the Windows taskbar progress state (`none`, `indeterminate`, `paused`, `error`, `normal`) and optional completion percentage (0–100) via `tauri::window::ProgressBarState`. |
+| `request_attention`  | `level?: String`                     | `{ ok: boolean }`                         | Requests or clears user attention on the main taskbar entry (`critical` flashes until focused, `informational` flashes briefly, `none` clears) via `window.request_user_attention`. |
+| `show_notification`  | `title: String, body: String, sound?: bool` | `{ ok: boolean }`                  | Emits a native Windows toast notification via `tauri-plugin-notification`.                                                                                                       |
+| `play_notification_sound` | `sound_type?: String`          | `{ ok: boolean }`                         | Plays a native Win32 system chime via `MessageBeep` (`info` $\rightarrow$ `0x40`, `warning` $\rightarrow$ `0x30`, `error` $\rightarrow$ `0x10`) without external audio dependencies. |
 | `quit_app`           | _(none)_                             | `()`                                      | Exits the Tauri process immediately (`app.exit(0)`), closing the system tray icon and background connection.                                                                     |
 
 ### 3.4 System Tray, Close-to-Tray & Customizable Global Shortcut (Default `Alt+Shift+3`)
@@ -201,6 +205,29 @@ Window resize/focus events and the tray, close-to-tray, and global-shortcut path
 A Windows regression test uses a separate child process to verify the real EcoQoS and priority flags, repeated transitions, and restoration without changing the scheduling of other tests. Both Windows architectures are built; native ARM64 behavior still requires validation on ARM hardware.
 
 See [Windows efficiency mode](https://devblogs.microsoft.com/performance-diagnostics/reduce-process-interference-with-task-manager-efficiency-mode/) and [SetProcessInformation](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation).
+
+### 3.6 Taskbar Progress (`ITaskbarList3`), User Attention & Native Notifications
+
+YAOC integrates deeply with the Windows shell to provide immediate peripheral feedback on agent run progress and pending execution decisions:
+
+1. **Taskbar State Machine (`set_taskbar_progress` & `request_attention`):**
+   - **Streaming Activity:** When any agent session is actively generating or executing tools (`streamingSessionKeys.size > 0`), the taskbar progress state transitions to `ProgressBarStatus::Indeterminate`, showing a green marquee wave on the YAOC taskbar icon.
+   - **Pending Tool Approvals:** When an `exec.approval.requested` event arrives and awaits operator decision (`approvals.length > 0`), taskbar progress transitions to `ProgressBarStatus::Paused` (yellow / amber). YAOC simultaneously calls `request_attention("critical")` (`UserAttentionType::Critical`), flashing the taskbar button continuously until the user focuses the window.
+   - **Idle State:** When all runs finish and no approvals remain, the progress bar is cleared (`ProgressBarStatus::None`), and any pending attention requests are dismissed on window focus.
+2. **Native Windows Toast Notifications (`show_notification`):**
+   - Integrated via `tauri-plugin-notification` (`app.notification().builder()`).
+   - Dispatches native Windows Action Center toasts when:
+     - An agent session completes generation while YAOC is unfocused or minimized (`!document.hasFocus() || document.hidden`).
+     - A tool execution approval is requested while YAOC is unfocused.
+   - **Unpackaged AppUserModelId & Start Menu Registration:** On Windows 10/11, WinRT `ToastNotificationManager` silently drops toast banners from unpackaged portable applications unless the process registers an explicit AUMID and a matching Start Menu shortcut. On startup, YAOC executes `SetCurrentProcessExplicitAppUserModelID(L"ai.openclaw.chat.lite")`, registers `HKCU\Software\Classes\AppUserModelId\ai.openclaw.chat.lite`, and ensures a Start Menu shortcut exists in `%APPDATA%\Microsoft\Windows\Start Menu\Programs\YAOC.lnk` with `PKEY_AppUserModel_ID` configured.
+   - Respects user toggles in **Settings $\rightarrow$ General** (`notificationsEnabled`, default `true`), persisted in `gateway-profiles.json` and mirrored in `localStorage`.
+3. **Low-Overhead Win32 Audio Chimes (`play_notification_sound`):**
+   - Invokes Win32 `MessageBeep(u_type)` via native FFI to `user32.dll`:
+     - `MB_ICONASTERISK` (`0x00000040`) for session run completion.
+     - `MB_ICONEXCLAMATION` (`0x00000030`) for approval requests.
+     - `MB_ICONHAND` (`0x00000010`) for errors.
+   - Requires zero external audio codecs, decoders, or runtime dependencies, ensuring zero memory overhead and seamless single-executable portability across both `x86_64` and `aarch64` Windows targets.
+   - Can be toggled independently via **Settings $\rightarrow$ General** (`notificationSound`, default `true`), and tested live with the **"Test Notification & Sound"** button.
 
 ---
 
@@ -320,10 +347,22 @@ Upstream `webview2-com-sys` attempts to link against MSVC-compiled `WebView2Load
   3. On first WebView2 call at runtime, `embedded_loader` writes the embedded DLL to a private per-process directory under `%LOCALAPPDATA%\yaoc\WebView2Loader`, validates the bytes while retaining a read lock for the lifetime of the process, prunes stale loader directories from exited processes, loads it via restricted `LoadLibraryExW`, and forwards the four WebView2 loader entry points (`CompareBrowserVersions`, `CreateCoreWebView2Environment`, `CreateCoreWebView2EnvironmentWithOptions`, `GetAvailableCoreWebView2BrowserVersionString`) via `GetProcAddress`.
 - **Do not remove `[patch.crates-io]`** from `src-tauri/Cargo.toml`, as it is required for single-file portability and `aarch64-pc-windows-gnullvm` compilation.
 
-### 5.3 Build Commands
+### 5.3 Build Commands & Binary Optimization
 
 - **Beta / Development Builds:** `npm run dist:all` (or `npm run dist:x64` / `npm run dist:arm64`)
 - **Official Release Builds:** `npm run release` (or `npm run release:x64` / `npm run release:arm64`)
+
+#### Release Profile Optimization (`src-tauri/Cargo.toml`)
+The release profile is tuned for standalone portability and minimal binary footprint:
+```toml
+[profile.release]
+strip = true
+opt-level = "s"      # Optimize for size
+lto = "thin"         # Cross-crate Link-Time Optimization
+codegen-units = 1    # Maximize whole-crate optimization and dead-code elimination
+panic = "abort"      # Strip C++ unwind / landing pad tables
+```
+This achieves a **~33% binary size reduction**, bringing the standalone portable executable to **~4.58 MB (x64)** and **~4.22 MB (ARM64)** while retaining the embedded `WebView2Loader.dll` and all native Windows shell/notification features.
 
 ### Session-scoped composer and run state
 
