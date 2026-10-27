@@ -94,5 +94,5 @@ Edit `src/assets/yaoc.svg` and run `npm.cmd run icons`. Sharp is a declared deve
 - **Linker not found:** ensure the LLVM-MinGW `bin` directory is on the current PATH.
 - **PowerShell blocks npm.ps1:** use `npm.cmd` as in these examples.
 - **Frontend changes missing:** use an npm build command. Calling Cargo alone embeds the existing `dist/` assets.
-- **WebView fails to start:** install/repair the Microsoft Edge WebView2 Runtime. Diagnostics are written to `%APPDATA%\openclaw-chat\diagnostics.log`; redact private data before sharing logs.
+- **WebView fails to start:** install/repair the Microsoft Edge WebView2 Runtime. Diagnostics are written to `%APPDATA%\yaoc\diagnostics.log`; redact private data before sharing logs.
 - **Shortcut already registered:** choose a different shortcut in Settings. Existing saved shortcuts override the default.

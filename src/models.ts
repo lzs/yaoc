@@ -52,6 +52,11 @@ export function sessionAgentId(key: string, fallback = 'main'): string {
   return /^agent:([^:]+):/i.exec(key.trim())?.[1].toLowerCase() || fallback.trim().toLowerCase();
 }
 
+// Match OpenClaw's cron classification on the canonical agent-scoped key.
+export function isCronSessionKey(key: string): boolean {
+  return /^agent:[^:]+:cron:/i.test(key.trim());
+}
+
 // Collapse short, qualified, and case aliases, preferring Gateway metadata and human labels.
 export function normalizeSessions(rows: SessionInfo[], fallbackAgent: string): SessionInfo[] {
   const sessions = new Map<string, { row: SessionInfo; qualified: boolean }>();

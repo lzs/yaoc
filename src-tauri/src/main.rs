@@ -69,7 +69,7 @@ pub struct DeviceIdentity {
     pub public_key_pem: String,
 }
 
-fn get_storage_dir() -> PathBuf {
+fn get_storage_dir() -> Result<PathBuf, String> {
     storage::user_storage_dir()
 }
 
@@ -80,7 +80,7 @@ fn serialize_device_identity_for_disk(identity: &DeviceIdentity) -> Result<Strin
 }
 
 fn load_or_create_device_identity() -> Result<DeviceIdentity, String> {
-    let dir = get_storage_dir();
+    let dir = get_storage_dir()?;
     let file_path = dir.join("device-identity.json");
     match fs::read_to_string(&file_path) {
         Ok(raw) => {
@@ -514,7 +514,7 @@ fn get_system_info(state: State<'_, Arc<GatewayState>>) -> Value {
 #[tauri::command]
 fn load_profiles() -> Result<Value, String> {
     log_boot("IPC load_profiles called");
-    let path = get_storage_dir().join("gateway-profiles.json");
+    let path = get_storage_dir()?.join("gateway-profiles.json");
     match fs::read_to_string(&path) {
         Ok(raw) => {
             let value: Value = serde_json::from_str(&raw).map_err(|e| {
@@ -581,7 +581,7 @@ fn save_profiles(
     serde_json::from_value::<Vec<GatewayProfile>>(profiles.clone())
         .map_err(|e| format!("Invalid connection profiles: {e}"))?;
     let encrypted_profiles = encrypt_profiles_array(profiles)?;
-    let dir = get_storage_dir();
+    let dir = get_storage_dir()?;
     fs::create_dir_all(&dir).map_err(|e| format!("Could not create settings directory: {e}"))?;
     let path = dir.join("gateway-profiles.json");
     let existing_ui_state = fs::read_to_string(&path)
@@ -1631,7 +1631,10 @@ fn toggle_main_window(app: &AppHandle) {
 }
 
 fn load_saved_global_hotkey() -> String {
-    let path = get_storage_dir().join("gateway-profiles.json");
+    let Ok(dir) = get_storage_dir() else {
+        return "Alt+Shift+3".to_string();
+    };
+    let path = dir.join("gateway-profiles.json");
     if let Ok(raw) = fs::read_to_string(&path) {
         if let Ok(val) = serde_json::from_str::<Value>(&raw) {
             if let Some(hk) = val
@@ -2077,7 +2080,13 @@ fn setup_system_tray(
 }
 
 fn log_boot(msg: &str) {
-    let dir = get_storage_dir();
+    let dir = match get_storage_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            eprintln!("{error}");
+            return;
+        }
+    };
     if fs::create_dir_all(&dir).is_err() {
         return;
     }

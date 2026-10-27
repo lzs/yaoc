@@ -49,6 +49,7 @@ import QuickSwitcher, { QuickSwitcherMode } from './QuickSwitcher';
 import SlashCommands, { SlashItem, DEFAULT_PROMPT_TEMPLATES } from './SlashCommands';
 import {
   normalizeSessions,
+  isCronSessionKey,
   sessionAgentId,
   sessionThinkingMetadata,
   toGatewaySessionKey,
@@ -5060,7 +5061,10 @@ export default function App() {
             typeof menuSession.modelProvider === 'string' ? menuSession.modelProvider : '';
           const fullModel =
             providerStr && modelStr ? `${providerStr}/${modelStr}` : modelStr || providerStr;
-          const kindStr = typeof menuSession.kind === 'string' ? menuSession.kind : '';
+          const rawKind = typeof menuSession.kind === 'string' ? menuSession.kind : '';
+          const kindStr = isCronSessionKey(menuSession.key)
+            ? `${rawKind}${rawKind ? ' ' : ''}(cron)`
+            : rawKind;
           const channelStr =
             typeof menuSession.channel === 'string'
               ? menuSession.channel

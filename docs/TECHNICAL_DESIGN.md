@@ -76,9 +76,9 @@ yaoc/
 
 ## 3. Rust Backend (`src-tauri/src/main.rs`)
 
-### 3.1 Local Persistence (`%APPDATA%\openclaw-chat\`)
+### 3.1 Local Persistence (`%APPDATA%\yaoc\`)
 
-`get_storage_dir()` resolves to `%APPDATA%\openclaw-chat` (falling back to Win32 `SHGetKnownFolderPath(FOLDERID_RoamingAppData)`, `%LOCALAPPDATA%`, or `%USERPROFILE%\AppData\Roaming` if `APPDATA` is unset, and never to a shared system temporary directory):
+`get_storage_dir()` resolves exclusively to `%APPDATA%\yaoc`. Missing, empty, or relative `APPDATA` values are errors; there are no alternative-directory or temporary-directory fallbacks. YAOC does not discover, read, or migrate an older application data directory:
 
 1. **`device-identity.json` (`DeviceIdentity`):**
    - Generated once on first run using `ed25519_dalek::SigningKey::generate(&mut OsRng)`.
@@ -174,8 +174,8 @@ yaoc/
 | Tauri Command        | Arguments                            | Return Type                               | Description                                                                                                                                                                      |
 | :------------------- | :----------------------------------- | :---------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `get_system_info`    | _(none)_                             | `SystemInfo`                              | Returns `platform: "win32"`, `arch`, `runtime: "tauri-v2"`, and `deviceIdentity` (`deviceId`, `publicKey`).                                                                      |
-| `load_profiles`      | _(none)_                             | `{ profiles, activeProfileId, uiState? }` | Loads profiles and UI state from `%APPDATA%\openclaw-chat\gateway-profiles.json` (or returns built-in defaults).                                                                 |
-| `save_profiles`      | `profiles, activeProfileId, uiState` | `{ ok: boolean }`                         | Writes profiles and UI state to `%APPDATA%\openclaw-chat\gateway-profiles.json`.                                                                                                 |
+| `load_profiles`      | _(none)_                             | `{ profiles, activeProfileId, uiState? }` | Loads profiles and UI state from `%APPDATA%\yaoc\gateway-profiles.json` (or returns built-in defaults).                                                                 |
+| `save_profiles`      | `profiles, activeProfileId, uiState` | `{ ok: boolean }`                         | Writes profiles and UI state to `%APPDATA%\yaoc\gateway-profiles.json`.                                                                                                 |
 | `gateway_connect`    | `profile: GatewayProfile`            | `Value`                                   | Connects to a live Gateway or starts `mock://demo` mode.                                                                                                                         |
 | `gateway_disconnect` | _(none)_                             | `{ ok: boolean }`                         | Closes the active WebSocket connection and cancels pending requests.                                                                                                             |
 | `gateway_request`    | `method, params, timeoutMs`          | `Value`                                   | Sends an RPC request over the active Gateway connection (or handles it in `handle_mock_rpc`).                                                                                    |
@@ -383,7 +383,7 @@ The composer keeps text and attachments per Gateway profile and agent/session ke
 
 YAOC (pronounced “yoke”) expands to “Yet Another OpenClaw Chat”. The npm and Cargo package name is `yaoc`; raw Cargo output is `yaoc.exe`, and portable binaries are `yaoc-x64.exe` and `yaoc-arm64.exe` with three rolling backups each. The workspace directory is named `yaoc`.
 
-The existing `%APPDATA%\openclaw-chat` (or `%TEMP%\openclaw-chat`) data directory, `ai.openclaw.chat.lite` Tauri/WebView2 identifier, and browser storage keys remain stable compatibility identifiers. This preserves saved profiles, device identity, cached pairing tokens, theme, hotkeys and UI settings without a data migration. The embedded WebView2 loader patch is retained; its private extraction directory is `%LOCALAPPDATA%\yaoc\WebView2Loader`.
+Application data uses `%APPDATA%\yaoc` exclusively, with no migration or lookup of previous storage locations. Existing installations must configure Gateway profiles and pair the newly created device identity again. The `ai.openclaw.chat.lite` Tauri/WebView2 identifier and browser storage keys remain unchanged; they do not determine the native profile/identity directory. The embedded WebView2 loader patch is retained; its private extraction directory is `%LOCALAPPDATA%\yaoc\WebView2Loader`.
 
 YAOC uses a wide, softly rounded orange Y/yoke mark on a transparent background, defined in `src/assets/yaoc.svg`, in the header, welcome screen, and browser favicon. `scripts/generate-icons.cjs` renders that vector with Sharp into the PNGs and multi-resolution ICO in `src-tauri/icons`. Tauri embeds those assets for the executable, window/taskbar, and system tray (via `default_window_icon`). The OpenClaw lobster is not used as the client icon.
 

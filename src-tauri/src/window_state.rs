@@ -81,7 +81,7 @@ impl Placement {
 
 pub fn restore(window: &Window) -> Result<(), Box<dyn std::error::Error>> {
     let state = window.state::<WindowState>();
-    let path = super::get_storage_dir().join("window-state.json");
+    let path = super::get_storage_dir()?.join("window-state.json");
     let result = (|| {
         let raw = match std::fs::read_to_string(path) {
             Ok(raw) => raw,
@@ -197,7 +197,7 @@ pub fn save(app: &tauri::AppHandle) {
     let placement = app.state::<WindowState>().placement.lock().unwrap().clone();
     if let Some(placement) = placement {
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-            let dir = super::get_storage_dir();
+            let dir = super::get_storage_dir()?;
             std::fs::create_dir_all(&dir)?;
             super::atomic_write(
                 &dir.join("window-state.json"),

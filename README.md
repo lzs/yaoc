@@ -51,7 +51,7 @@ These commands assume the Rust GNU/LLVM targets and LLVM-MinGW are installed. Se
 
 ## Data and security
 
-For compatibility with earlier builds, profiles and the device identity remain in `%APPDATA%\openclaw-chat\` (with a temporary-directory fallback if the normal environment variables are unavailable). **Saved authentication tokens, passwords, and the device private key are not encrypted by YAOC.** Protect that directory as sensitive user data, and do not attach it to issues or commit it to Git.
+YAOC stores profiles, the device identity, window placement, and diagnostics in `%APPDATA%\yaoc\`. On Windows, saved authentication tokens, passwords, and the device private key are encrypted using Windows DPAPI, bound to the current Windows user account. Protect that directory as sensitive user data, and do not attach it to issues or commit it to Git. YAOC requires a valid `APPDATA` directory and does not fall back to temporary storage.
 
 YAOC sends messages, attachments, and workspace changes to the selected Gateway. Model availability, workspace access, and execution approvals depend on that Gateway's version and permissions. See [Security](SECURITY.md) for the trust model and reporting guidance.
 

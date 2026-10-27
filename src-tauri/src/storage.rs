@@ -10,30 +10,17 @@ static WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub const DPAPI_PREFIX: &str = "dpapi:";
 const DPAPI_ENTROPY: &[u8] = b"yaoc.openclaw.credentials.v1";
 
-pub fn user_storage_dir() -> PathBuf {
-    if let Some(appdata) = std::env::var_os("APPDATA").filter(|v| !v.is_empty()) {
-        return PathBuf::from(appdata).join("openclaw-chat");
-    }
-    #[cfg(target_os = "windows")]
-    if let Some(roaming) = dpapi::known_roaming_appdata_dir() {
-        return roaming.join("openclaw-chat");
-    }
-    if let Some(local_appdata) = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()) {
-        return PathBuf::from(local_appdata).join("openclaw-chat");
-    }
-    if let Some(user_profile) = std::env::var_os("USERPROFILE").filter(|v| !v.is_empty()) {
-        return PathBuf::from(user_profile)
-            .join("AppData")
-            .join("Roaming")
-            .join("openclaw-chat");
-    }
-    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
-        return PathBuf::from(xdg).join("openclaw-chat");
-    }
-    if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
-        return PathBuf::from(home).join(".config").join("openclaw-chat");
-    }
-    std::env::temp_dir().join("openclaw-chat")
+pub fn user_storage_dir() -> Result<PathBuf, String> {
+    storage_dir_from_appdata(std::env::var_os("APPDATA"))
+}
+
+fn storage_dir_from_appdata(appdata: Option<std::ffi::OsString>) -> Result<PathBuf, String> {
+    let root = appdata
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or("YAOC requires APPDATA to identify an absolute user data directory")?;
+    Ok(root.join("yaoc"))
 }
 
 pub fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
@@ -104,68 +91,6 @@ mod dpapi {
         fn LocalFree(h_mem: *mut c_void) -> *mut c_void;
     }
 
-    #[repr(C)]
-    struct Guid {
-        data1: u32,
-        data2: u16,
-        data3: u16,
-        data4: [u8; 8],
-    }
-
-    // FOLDERID_RoamingAppData = {3EB685DB-65F9-4CF6-A03A-E3EF65729F3D}
-    const FOLDERID_ROAMING_APPDATA: Guid = Guid {
-        data1: 0x3EB685DB,
-        data2: 0x65F9,
-        data3: 0x4CF6,
-        data4: [0xA0, 0x3A, 0xE3, 0xEF, 0x65, 0x72, 0x9F, 0x3D],
-    };
-
-    #[link(name = "shell32")]
-    extern "system" {
-        fn SHGetKnownFolderPath(
-            rfid: *const Guid,
-            dw_flags: u32,
-            h_token: *mut c_void,
-            ppsz_path: *mut *mut u16,
-        ) -> i32;
-    }
-
-    #[link(name = "ole32")]
-    extern "system" {
-        fn CoTaskMemFree(pv: *mut c_void);
-    }
-
-    pub fn known_roaming_appdata_dir() -> Option<PathBuf> {
-        use std::os::windows::ffi::OsStringExt;
-        let mut raw_path: *mut u16 = ptr::null_mut();
-        let hr = unsafe {
-            SHGetKnownFolderPath(
-                &FOLDERID_ROAMING_APPDATA,
-                0,
-                ptr::null_mut(),
-                &mut raw_path,
-            )
-        };
-        if hr < 0 || raw_path.is_null() {
-            return None;
-        }
-        let path = unsafe {
-            let mut len = 0usize;
-            while *raw_path.add(len) != 0 {
-                len += 1;
-            }
-            let slice = std::slice::from_raw_parts(raw_path, len);
-            let os_str = std::ffi::OsString::from_wide(slice);
-            CoTaskMemFree(raw_path as *mut c_void);
-            PathBuf::from(os_str)
-        };
-        if path.as_os_str().is_empty() {
-            None
-        } else {
-            Some(path)
-        }
-    }
-
     pub fn protect(plaintext: &str) -> Result<String, String> {
         if plaintext.is_empty() {
             return Ok(String::new());
@@ -208,7 +133,10 @@ mod dpapi {
             LocalFree(out_blob.pb_data as *mut c_void);
             vec
         };
-        Ok(format!("{DPAPI_PREFIX}{}", URL_SAFE_NO_PAD.encode(encrypted)))
+        Ok(format!(
+            "{DPAPI_PREFIX}{}",
+            URL_SAFE_NO_PAD.encode(encrypted)
+        ))
     }
 
     pub fn unprotect(stored: &str) -> Result<(String, bool), String> {
@@ -225,7 +153,8 @@ mod dpapi {
             return Err("Saved DPAPI secret is empty".to_string());
         }
         let in_blob = CryptoApiBlob {
-            cb_data: u32::try_from(cipher_bytes.len()).map_err(|_| "Encrypted secret is too large")?,
+            cb_data: u32::try_from(cipher_bytes.len())
+                .map_err(|_| "Encrypted secret is too large")?,
             pb_data: cipher_bytes.as_mut_ptr(),
         };
         let entropy_blob = CryptoApiBlob {
@@ -280,7 +209,10 @@ pub fn protect_secret(plaintext: &str) -> Result<String, String> {
     eprintln!(
         "WARNING: Encrypted credential storage (Windows DPAPI) is not supported on this platform. Secrets will be stored in cleartext."
     );
-    Ok(format!("{DPAPI_PREFIX}{}", URL_SAFE_NO_PAD.encode(plaintext.as_bytes())))
+    Ok(format!(
+        "{DPAPI_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(plaintext.as_bytes())
+    ))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -301,6 +233,17 @@ pub fn unprotect_secret(stored: &str) -> Result<(String, bool), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn storage_uses_only_the_yaoc_appdata_directory() {
+        let root = std::env::temp_dir().join("yaoc-path-resolution-test");
+        assert_eq!(
+            storage_dir_from_appdata(Some(root.clone().into_os_string())).unwrap(),
+            root.join("yaoc")
+        );
+        assert!(storage_dir_from_appdata(None).is_err());
+        assert!(storage_dir_from_appdata(Some("".into())).is_err());
+        assert!(storage_dir_from_appdata(Some("relative-data".into())).is_err());
+    }
     #[test]
     fn replaces_existing_file_and_leaves_no_temporary_files() {
         let dir = std::env::temp_dir().join(format!(

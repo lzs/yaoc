@@ -18,4 +18,4 @@ Do not post tokens, passwords, private keys, personal conversations, or a workin
 
 ## Before publishing a release
 
-Run the checks in `docs/BUILD.md`, `npm audit`, and `cargo audit --file src-tauri/Cargo.lock`. Review informational and platform-specific advisories as well as vulnerability errors. Retain dependency license notices in the release archive. Never publish `%APPDATA%\openclaw-chat`, local coding-agent files, or development logs.
+Run the checks in `docs/BUILD.md`, `npm audit`, and `cargo audit --file src-tauri/Cargo.lock`. Review informational and platform-specific advisories as well as vulnerability errors. Retain dependency license notices in the release archive. Never publish `%APPDATA%\yaoc`, local coding-agent files, or development logs.
