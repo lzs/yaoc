@@ -128,6 +128,14 @@ export interface SystemInfo {
   };
 }
 
+export interface PromptTemplate {
+  id: string;
+  trigger: string;
+  label: string;
+  template: string;
+  isBuiltIn?: boolean;
+}
+
 export interface UiSessionState {
   autoConnect?: boolean;
   selectedAgentId?: string;
@@ -142,6 +150,7 @@ export interface UiSessionState {
   globalHotkey?: string;
   notificationsEnabled?: boolean;
   notificationSound?: boolean;
+  promptTemplates?: PromptTemplate[];
 }
 
 declare global {

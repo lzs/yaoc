@@ -193,6 +193,17 @@ yaoc/
 - **Customizable Global Hotkey (`spawn_global_hotkey_listener` & `set_global_hotkey`):** Spawns a background thread calling Win32 `RegisterHotKey` and `GetMessageW` (`WM_HOTKEY`). Defaults to `Alt+Shift+3`, persisted in `uiState.globalHotkey` (`gateway-profiles.json`), and can be recorded, reset, or disabled live from **Settings $\rightarrow$ General**.
 - **`Ctrl+Page Up/Down` Session Navigation:** Switches to the previous/next session in sidebar order, wrapping at either end. Reuses the existing session-selection path to preserve drafts and scroll state, scrolls the selected row into view, and focuses the composer. Navigation is suppressed during shortcut recording, composition, and modal dialogs.
 - **`Ctrl+,` & `Ctrl+Q` In-Window Shortcuts:** Pressing `Ctrl+,` inside the window opens the Settings modal, and pressing `Ctrl+Q` opens a quit confirmation modal (press `Ctrl+Q` again to confirm quit via `quit_app`, or `Esc` to cancel).
+- **`Ctrl+P` & `Ctrl+Shift+P` Quick Switcher & Command Palette:**
+  - `Ctrl+P`: Opens the Quick Switcher in **Session and File Search** mode across agents and workspace files.
+  - `Ctrl+Shift+P`: Opens the Command Palette in **Command Actions** mode (prefixed with `>`).
+  - Supports dynamic mode switching: typing `>` switches instantly to command actions; backspacing `>` returns to search mode.
+  - Actions include `New Session`, `Open Settings`, `Toggle Workspace Drawer`, `Switch Theme`, `Reset Session`, `Toggle Notifications`, `Toggle Sound`, `Test Notification & Sound`, `Connect / Disconnect Gateway`, `Quit Application`, and agent switching.
+  - *Explicit Keyboard Policy:* Binds strictly `Ctrl+P` and `Ctrl+Shift+P`; no `Ctrl+K`. Prevents WebView2 default print dialog.
+- **Slash Commands & Prompt Template Autocomplete (`/` in Composer):**
+  - Typing `/` in the message composer opens an autocomplete popup directly anchored above the input bar.
+  - Autocompletes built-in Gateway commands (`/reset`, `/compact`, `/status`, `/stop`, `/help`) and prompt templates (`/review`, `/test`, `/fix`, `/explain`, `/refactor`, `/doc`).
+  - Supports custom user prompt templates managed in **Settings $\rightarrow$ General** and persisted across app restarts.
+  - Arrow navigation (<kbd>↑</kbd>/<kbd>↓</kbd>) with <kbd>Tab</kbd> or <kbd>Enter</kbd> expansion.
 
 ### 3.5 Background efficiency mode
 

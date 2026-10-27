@@ -34,6 +34,7 @@ import {
   ConnectionStatus,
   ExecApprovalRequest,
   GatewayProfile,
+  PromptTemplate,
   SessionInfo,
   SystemInfo,
   ToolCallItem,
@@ -44,6 +45,8 @@ import {
 import { applyTheme, loadTheme, saveTheme, Theme } from './theme';
 import AgentSwitcher from './AgentSwitcher';
 import SessionModelSwitcher from './SessionModelSwitcher';
+import QuickSwitcher, { QuickSwitcherMode } from './QuickSwitcher';
+import SlashCommands, { SlashItem, DEFAULT_PROMPT_TEMPLATES } from './SlashCommands';
 import {
   normalizeSessions,
   sessionAgentId,
@@ -510,6 +513,24 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<'general' | 'gateway'>('general');
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const settingsDialogRef = useRef<HTMLDivElement | null>(null);
+
+  // Quick Switcher & Command Palette State (Ctrl+P / Ctrl+Shift+P)
+  const [showQuickSwitcher, setShowQuickSwitcher] = useState(false);
+  const [quickSwitcherMode, setQuickSwitcherMode] = useState<QuickSwitcherMode>('search');
+
+  // Slash Commands & Prompt Templates State (/ in composer)
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>(() => {
+    try {
+      const raw = localStorage.getItem('yaoc.promptTemplates.v1');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return [];
+  });
+  const [newTemplateTrigger, setNewTemplateTrigger] = useState('');
+  const [newTemplateLabel, setNewTemplateLabel] = useState('');
+  const [newTemplateBody, setNewTemplateBody] = useState('');
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -2176,8 +2197,8 @@ export default function App() {
     setPendingAttachments((prev) => prev.filter((a) => a.id !== attId));
   }
 
-  async function handleSendMessage() {
-    const text = composerText.trim();
+  async function handleSendMessage(overrideText?: string) {
+    const text = (typeof overrideText === 'string' ? overrideText : composerText).trim();
     const atts = pendingAttachments;
     if (
       (text.length === 0 && atts.length === 0) ||
@@ -2281,15 +2302,21 @@ export default function App() {
     };
   }, [sessionMenu]);
 
-  // Dismiss Settings or Lightbox on Escape
+  // Dismiss Settings, Lightbox, or Quick Switcher on Escape
   useEffect(() => {
-    if (!showProfileModal && !lightboxImage) return;
+    if (!showProfileModal && !lightboxImage && !showQuickSwitcher) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (isRecordingHotkey) {
           e.preventDefault();
           e.stopPropagation();
           setIsRecordingHotkey(false);
+          return;
+        }
+        if (showQuickSwitcher) {
+          e.preventDefault();
+          setShowQuickSwitcher(false);
+          focusComposerInput();
           return;
         }
         if (lightboxImage) {
@@ -2301,7 +2328,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showProfileModal, lightboxImage, isRecordingHotkey]);
+  }, [showProfileModal, lightboxImage, isRecordingHotkey, showQuickSwitcher]);
 
   async function applyGlobalHotkey(nextHotkey: string) {
     const cleaned = nextHotkey.trim();
@@ -2440,6 +2467,31 @@ export default function App() {
         }
         return;
       }
+      // Quick Switcher (Ctrl+P for search) & Command Palette (Ctrl+Shift+P for commands) — no Ctrl+K
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        (e.key.toLowerCase() === 'p' || e.code === 'KeyP')
+      ) {
+        if (
+          e.defaultPrevented ||
+          e.isComposing ||
+          showProfileModal ||
+          showQuitConfirmModal ||
+          lightboxImage ||
+          isRecordingHotkey
+        ) {
+          return;
+        }
+        e.preventDefault();
+        if (e.shiftKey) {
+          setQuickSwitcherMode('command');
+        } else {
+          setQuickSwitcherMode('search');
+        }
+        setShowQuickSwitcher(true);
+        return;
+      }
       if (
         (e.ctrlKey || e.metaKey) &&
         !e.altKey &&
@@ -2478,6 +2530,7 @@ export default function App() {
     selectedSessionKey,
     selectedAgentId,
     connStatus.state,
+    showQuickSwitcher,
   ]);
 
   // Drag resize handlers for left sidebar and right workspace panel
@@ -2656,6 +2709,58 @@ export default function App() {
     } catch (err: any) {
       alert(`Failed to resolve approval: ${err?.message}`);
     }
+  }
+
+  function handleSelectSlashItem(item: SlashItem) {
+    setSlashMenuOpen(false);
+    if (item.category === 'command') {
+      setComposerText(item.label + ' ');
+      requestAnimationFrame(() => {
+        const el = composerInputRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(item.label.length + 1, item.label.length + 1);
+        }
+      });
+    } else if (item.templateText) {
+      setComposerText(item.templateText);
+      requestAnimationFrame(() => {
+        const el = composerInputRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(item.templateText!.length, item.templateText!.length);
+        }
+      });
+    }
+  }
+
+  function handleAddPromptTemplate() {
+    const rawTrigger = newTemplateTrigger.trim().replace(/^\/+/, '').toLowerCase();
+    const body = newTemplateBody.trim();
+    if (!rawTrigger || !body) return;
+
+    const newTpl: PromptTemplate = {
+      id: `custom-${Date.now()}`,
+      trigger: rawTrigger,
+      label: newTemplateLabel.trim() || rawTrigger,
+      template: body + '\n\n',
+    };
+    const nextList = [...promptTemplates, newTpl];
+    setPromptTemplates(nextList);
+    try {
+      localStorage.setItem('yaoc.promptTemplates.v1', JSON.stringify(nextList));
+    } catch {}
+    setNewTemplateTrigger('');
+    setNewTemplateLabel('');
+    setNewTemplateBody('');
+  }
+
+  function handleDeletePromptTemplate(id: string) {
+    const nextList = promptTemplates.filter((t) => t.id !== id);
+    setPromptTemplates(nextList);
+    try {
+      localStorage.setItem('yaoc.promptTemplates.v1', JSON.stringify(nextList));
+    } catch {}
   }
 
   function handleSelectSession(key: string, focusComposer = true) {
@@ -3713,56 +3818,84 @@ export default function App() {
               </div>
             )}
 
-            <div className="composer-bar">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  if (e.target.files && e.target.files.length > 0) {
-                    handleAddFiles(e.target.files, 'file');
-                  }
-                  e.target.value = '';
-                }}
+            <div className="composer-relative-container">
+              <SlashCommands
+                isOpen={slashMenuOpen}
+                filter={slashFilter}
+                customTemplates={promptTemplates}
+                onSelect={handleSelectSlashItem}
+                onClose={() => setSlashMenuOpen(false)}
               />
-              <textarea
-                ref={composerInputRef}
-                className="composer-input"
-                aria-label="Message Assistant"
-                rows={2}
-                placeholder={
-                  connStatus.state === 'connected'
-                    ? 'Message Assistant'
-                    : 'Connect to a Gateway to message Assistant'
-                }
-                value={composerText}
-                disabled={connStatus.state !== 'connected'}
-                onChange={(e) => setComposerText(e.target.value)}
-                onPaste={(e) => {
-                  if (connStatus.state !== 'connected') return;
-                  const items = e.clipboardData?.items;
-                  if (!items) return;
-                  const pastedFiles: File[] = [];
-                  for (let i = 0; i < items.length; i++) {
-                    const item = items[i];
-                    if (item.kind === 'file') {
-                      const file = item.getAsFile();
-                      if (file) pastedFiles.push(file);
+              <div className="composer-bar">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleAddFiles(e.target.files, 'file');
                     }
+                    e.target.value = '';
+                  }}
+                />
+                <textarea
+                  ref={composerInputRef}
+                  className="composer-input"
+                  aria-label="Message Assistant"
+                  rows={2}
+                  placeholder={
+                    connStatus.state === 'connected'
+                      ? 'Message Assistant (type / for commands)'
+                      : 'Connect to a Gateway to message Assistant'
                   }
-                  if (pastedFiles.length > 0) {
-                    e.preventDefault();
-                    handleAddFiles(pastedFiles, 'paste');
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-              />
+                  value={composerText}
+                  disabled={connStatus.state !== 'connected'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setComposerText(val);
+                    if (val.startsWith('/') && !val.includes('\n')) {
+                      const spaceIdx = val.indexOf(' ');
+                      if (spaceIdx === -1) {
+                        setSlashFilter(val.slice(1));
+                        setSlashMenuOpen(true);
+                        return;
+                      }
+                    }
+                    setSlashMenuOpen(false);
+                  }}
+                  onPaste={(e) => {
+                    if (connStatus.state !== 'connected') return;
+                    const items = e.clipboardData?.items;
+                    if (!items) return;
+                    const pastedFiles: File[] = [];
+                    for (let i = 0; i < items.length; i++) {
+                      const item = items[i];
+                      if (item.kind === 'file') {
+                        const file = item.getAsFile();
+                        if (file) pastedFiles.push(file);
+                      }
+                    }
+                    if (pastedFiles.length > 0) {
+                      e.preventDefault();
+                      handleAddFiles(pastedFiles, 'paste');
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (slashMenuOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab' || e.key === 'Escape')) {
+                      // Handled by SlashCommands
+                      return;
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      if (slashMenuOpen) {
+                        // Handled by SlashCommands
+                        return;
+                      }
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                />
               <div className="composer-toolbar">
                 <button
                   type="button"
@@ -3820,7 +3953,7 @@ export default function App() {
                     className="composer-icon-btn composer-send-btn"
                     aria-label="Send message"
                     title="Send message (Enter)"
-                    onClick={handleSendMessage}
+                    onClick={() => handleSendMessage()}
                     disabled={
                       connStatus.state !== 'connected' ||
                       isChangingModel ||
@@ -3833,7 +3966,8 @@ export default function App() {
               </div>
             </div>
           </div>
-        </main>
+        </div>
+      </main>
 
         {/* Right Pane: Full Workspace Directory Browser & File Editor */}
         {showWorkspacePane && (
@@ -4395,6 +4529,141 @@ export default function App() {
                     <p className="settings-help">
                       Notifies when agent generations complete or when tool execution approvals are requested while YAOC is unfocused or minimized to tray.
                     </p>
+                  </div>
+
+                  <div className="form-row">
+                    <label>Prompt Templates &amp; Slash Commands</label>
+                    <p className="settings-help" style={{ marginBottom: '8px' }}>
+                      Type <code>/</code> in the message composer to trigger built-in Gateway commands
+                      (<code>/reset</code>, <code>/compact</code>, <code>/status</code>, <code>/stop</code>, <code>/help</code>)
+                      or quickly insert prompt templates.
+                    </p>
+
+                    <div style={{ maxHeight: '180px', overflowY: 'auto', marginBottom: '10px' }}>
+                      {/* Built-in templates */}
+                      {DEFAULT_PROMPT_TEMPLATES.map((tpl) => (
+                        <div key={tpl.id} className="template-item-row">
+                          <div className="template-item-details">
+                            <div className="template-item-header">
+                              <span className="template-item-trigger">/{tpl.trigger}</span>
+                              <span className="template-item-label">{tpl.label}</span>
+                              <span
+                                style={{
+                                  fontSize: '9.5px',
+                                  padding: '1px 5px',
+                                  borderRadius: '3px',
+                                  background: 'var(--bg-panel)',
+                                  color: 'var(--text-muted)',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Built-in
+                              </span>
+                            </div>
+                            <span className="template-item-snippet">{tpl.template}</span>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Custom user templates */}
+                      {promptTemplates.map((tpl) => (
+                        <div key={tpl.id} className="template-item-row">
+                          <div className="template-item-details">
+                            <div className="template-item-header">
+                              <span className="template-item-trigger">/{tpl.trigger}</span>
+                              <span className="template-item-label">{tpl.label}</span>
+                              <span
+                                style={{
+                                  fontSize: '9.5px',
+                                  padding: '1px 5px',
+                                  borderRadius: '3px',
+                                  background: 'rgba(249, 115, 22, 0.15)',
+                                  color: 'var(--accent)',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Custom
+                              </span>
+                            </div>
+                            <span className="template-item-snippet">{tpl.template}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{ padding: '4px 8px', color: 'var(--text-danger)' }}
+                            onClick={() => handleDeletePromptTemplate(tpl.id)}
+                            title={`Delete /${tpl.trigger}`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Add Custom Template */}
+                    <div
+                      style={{
+                        background: 'var(--bg-root)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      <div style={{ fontSize: '12px', fontWeight: 600 }}>Add Custom Template</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '8px' }}>
+                        <div>
+                          <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>
+                            Trigger keyword
+                          </label>
+                          <input
+                            className="input-field"
+                            placeholder="e.g. audit"
+                            value={newTemplateTrigger}
+                            onChange={(e) => setNewTemplateTrigger(e.target.value)}
+                            style={{ fontSize: '12px' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>
+                            Display label
+                          </label>
+                          <input
+                            className="input-field"
+                            placeholder="e.g. Security Audit"
+                            value={newTemplateLabel}
+                            onChange={(e) => setNewTemplateLabel(e.target.value)}
+                            style={{ fontSize: '12px' }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>
+                          Template prompt text
+                        </label>
+                        <textarea
+                          className="input-field"
+                          rows={2}
+                          placeholder="e.g. Review the following code specifically for security vulnerabilities..."
+                          value={newTemplateBody}
+                          onChange={(e) => setNewTemplateBody(e.target.value)}
+                          style={{ fontSize: '12px', resize: 'vertical' }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ fontSize: '11.5px', padding: '4px 12px' }}
+                          onClick={handleAddPromptTemplate}
+                          disabled={!newTemplateTrigger.trim() || !newTemplateBody.trim()}
+                        >
+                          <Plus size={13} /> Add Template
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div
@@ -5000,6 +5269,78 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Quick Switcher & Command Palette Modal (Ctrl+P / Ctrl+Shift+P) */}
+      <QuickSwitcher
+        isOpen={showQuickSwitcher}
+        initialMode={quickSwitcherMode}
+        onClose={() => {
+          setShowQuickSwitcher(false);
+          focusComposerInput();
+        }}
+        sessions={sessions}
+        selectedSessionKey={selectedSessionKey}
+        selectedAgentId={selectedAgentId}
+        agents={agents}
+        workspaceFiles={workspaceFiles}
+        showWorkspacePane={showWorkspacePane}
+        theme={theme}
+        notificationsEnabled={notificationsEnabled}
+        notificationSound={notificationSound}
+        isConnected={connStatus.state === 'connected'}
+        onSelectSession={(key) => handleSelectSession(key)}
+        onSelectFile={(filePath) => {
+          setShowWorkspacePane(true);
+          loadWorkspaceFile(selectedAgentId, filePath);
+        }}
+        onNewSession={() => {
+          setShowNewSessionInput(true);
+        }}
+        onOpenSettings={() => {
+          setShowProfileModal(true);
+        }}
+        onToggleWorkspace={() => {
+          setShowWorkspacePane((v) => !v);
+        }}
+        onToggleTheme={() => {
+          setTheme((prev) => (prev === 'dark' ? 'light' : prev === 'light' ? 'system' : 'dark'));
+        }}
+        onClearSession={() => {
+          handleSendMessage('/reset');
+        }}
+        onSelectAgent={(agentId) => {
+          setSelectedAgentId(agentId);
+          if (connStatus.state === 'connected') {
+            refreshGatewayState(agentId, selectedSessionKey);
+          }
+        }}
+        onToggleNotifications={() => {
+          setNotificationsEnabled((v) => !v);
+        }}
+        onToggleSound={() => {
+          setNotificationSound((v) => !v);
+        }}
+        onTestNotification={() => {
+          window.openclawApi?.showNotification?.(
+            'YAOC - Test Notification',
+            'Windows desktop notifications and audio alerts are working properly!',
+            notificationSound
+          );
+          if (!notificationsEnabled && notificationSound) {
+            window.openclawApi?.playNotificationSound?.('info');
+          }
+        }}
+        onToggleConnect={() => {
+          if (connStatus.state === 'connected') {
+            handleDisconnect();
+          } else {
+            handleConnect();
+          }
+        }}
+        onQuitApp={() => {
+          setShowQuitConfirmModal(true);
+        }}
+      />
     </div>
   );
 }
