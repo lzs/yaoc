@@ -287,7 +287,7 @@ OpenClaw Gateways expose two tiers of file APIs depending on server version and 
    - If that fails, falls back to `agents.files.get` `{ agentId, name: cleanRelPath }` (which has a strict schema accepting only `agentId` + root `name`).
 3. **Saving / Creating a File (`handleSaveWorkspaceFile`):**
    - If the file is in the workspace root (`!cleanRelPath.includes('/')`), first attempts `agents.files.set` `{ agentId, name: cleanRelPath, content }`.
-   - If the file is in a subdirectory (or `agents.files.set` rejects non-standard root filenames), falls back to `sessions.files.set` `{ sessionKey, path: "${workspaceRootPath}/${cleanRelPath}", content }`.
+   - If the file is in a subdirectory (or `agents.files.set` rejects non-standard root filenames), falls back to `sessions.files.set` `{ sessionKey, path: "${workspaceRootPath}/${cleanRelPath}", content, expectedHash }`. The required `expectedHash` is the Gateway-reported hash captured when loading the file, or SHA-256 of the last-read UTF-8 contents when the read API omits a hash. Successful saves replace the saved baseline and retain the returned hash for the next save. Conflict errors keep the draft and instruct the user to copy it before reloading; they never retry with a newer hash or overwrite the remote edit.
 
 #### Tool Execution Approvals
 
@@ -450,3 +450,11 @@ The chat header keeps a 44px minimum height and grows when its identity or actio
 ### Shortcut discovery
 
 The sidebar's labelled Shortcuts button, Ctrl+/, and the Show Keyboard Shortcuts palette action all open Settings directly to its Shortcuts tab. `KeyboardShortcuts.tsx` groups the reference by task and explains search, commands, chat, workspace, and window actions. Its global show/hide entry reflects the configured shortcut or Disabled state. Ctrl+/ preserves the draft, closes the palette before opening Settings, and respects composition, hotkey recording, rename, quit-confirmation, and image-viewer guards. A plain slash remains a composer action. Ctrl+PageUp and Ctrl+PageDown cycle Settings tabs with wraparound and focus the selected tab while Settings is open; outside Settings they retain session navigation. The main-window footer shows the version only; platform and architecture details are available in About.
+
+## Signed portable updates
+
+Settings → About offers manual check, verified download, and confirmed restart against official GitHub Releases. `src-tauri/src/updater.rs` owns the fixed endpoint, strict Ed25519 manifest verification using `src-tauri/update-public.json`, SemVer downgrade protection, architecture selection, bounded HTTPS streaming, SHA-256 checks, private staging, backup and replacement, and predecessor-wait restart. Narrow IPC commands take no caller-supplied URLs or filesystem paths. `src/UpdateSettings.tsx` presents progress/error states; App blocks restart for all session drafts/attachments, active runs, and unsaved/saving workspace files.
+
+The pinned `self-replace` dependency is isolated behind one adapter. Recovery restores missing executable paths after partial swaps and restores the prior executable on immediate spawn failure; later startup crashes require manual recovery from the adjacent `.pre-update.exe` copy. Original paths are cached before replacement because Windows changes `current_exe()` when the running image is renamed. Temporary files are discarded before process exit, which does not guarantee destructor execution.
+
+`scripts/update-sign.cjs` signs exact payload bytes under a protocol domain prefix, validates both PE architectures and the embedded public identity, and rejects Beta versions. The manually dispatched release workflow builds/tests and creates a signed draft; ordinary CI remains Beta. See [UPDATES.md](UPDATES.md) for publishing, secret setup, protocol details, recovery, and native validation requirements.

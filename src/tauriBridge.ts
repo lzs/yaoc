@@ -87,6 +87,9 @@ export function initTauriBridge(): void {
   };
 
   const api = {
+    checkForUpdate: () => invokeWithError<import('./types').UpdateInfo | null>('check_for_update'),
+    downloadUpdate: () => invokeWithError<void>('download_update'),
+    installUpdate: () => invokeWithError<void>('install_update'),
     getSystemInfo: () => invokeWithError<SystemInfo>('get_system_info'),
 
     loadProfiles: () =>

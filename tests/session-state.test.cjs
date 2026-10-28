@@ -107,7 +107,7 @@ const source = fs
 const renderStart = source.indexOf('\n  return (', source.indexOf('export default function App()'));
 const testSource =
   source.slice(0, renderStart) +
-  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint, handleResetSession, handleSaveWorkspaceFile, loadWorkspaceFile, fetchSessionsAndSyncSelection, setActiveFileName, setFileContent, setSavedFileContent, fileContent, savedFileContent, activeFileName, fileStatusMsg, loadingFile, selectedAgentId, focusComposerInput, composerInputRef, settingsTab, showProfileModal }; }`;
+  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint, handleResetSession, handleSaveWorkspaceFile, loadWorkspaceFile, fetchSessionsAndSyncSelection, setActiveFileName, setFileContent, setSavedFileContent, fileContent, savedFileContent, savedFileHash, activeFileName, fileStatusMsg, loadingFile, selectedAgentId, focusComposerInput, composerInputRef, settingsTab, showProfileModal }; }`;
 const exportsObject = {};
 vm.runInNewContext(compile(testSource), {
   exports: exportsObject,
@@ -137,6 +137,8 @@ vm.runInNewContext(compile(testSource), {
     timers.delete(id);
   },
   console,
+  crypto: require('node:crypto').webcrypto,
+  TextEncoder,
   Blob,
   URL,
 });

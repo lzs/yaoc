@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import UpdateSettings from './UpdateSettings';
 import {
   ArrowUp,
   Bot,
@@ -507,6 +508,16 @@ function getSessionDisplayName(s: SessionInfo): string {
   return rawKey.replace(/^agent:[^:]+:/, '') || rawKey;
 }
 
+function workspaceFileHash(response: any): string | undefined {
+  const hash = response?.file?.hash ?? response?.hash;
+  return typeof hash === 'string' && /^[a-f0-9]{64}$/i.test(hash) ? hash.toLowerCase() : undefined;
+}
+
+async function hashWorkspaceText(content: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export default function App() {
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
   const [profiles, setProfiles] = useState<GatewayProfile[]>([]);
@@ -778,6 +789,7 @@ export default function App() {
   );
   const [fileContent, setFileContent] = useState<string>('');
   const [savedFileContent, setSavedFileContent] = useState<string>('');
+  const [savedFileHash, setSavedFileHash] = useState<string | undefined>();
   const [loadingFile, setLoadingFile] = useState(false);
   const [savingFile, setSavingFile] = useState(false);
   const [fileStatusMsg, setFileStatusMsg] = useState<string>('');
@@ -2169,6 +2181,7 @@ export default function App() {
       setActiveFileName(cleanRelPath);
       setFileContent(text);
       setSavedFileContent(text);
+      setSavedFileHash(workspaceFileHash(res));
       setFileStatusMsg(`${cleanRelPath} • ${(bytes / 1024).toFixed(1)} KB`);
       setLoadingFile(false);
       return;
@@ -2189,6 +2202,7 @@ export default function App() {
       setActiveFileName(cleanRelPath);
       setFileContent(text);
       setSavedFileContent(text);
+      setSavedFileHash(workspaceFileHash(res));
       setFileStatusMsg(`${cleanRelPath} • ${(bytes / 1024).toFixed(1)} KB`);
       setLoadingFile(false);
       return;
@@ -2197,6 +2211,7 @@ export default function App() {
       setActiveFileName(cleanRelPath);
       setFileContent('');
       setSavedFileContent('');
+      setSavedFileHash(undefined);
       setFileStatusMsg(
         `Could not load ${cleanRelPath}: ${err?.message || 'File does not exist yet'}`
       );
@@ -2235,10 +2250,11 @@ export default function App() {
 
     try {
       let saved = false;
+      let savedResult: any;
       // 1. If root agent file, try agents.files.set({ agentId, name, content }) first
       if (isRootFile) {
         try {
-          await api.request('agents.files.set', {
+          savedResult = await api.request('agents.files.set', {
             agentId: selectedAgentId,
             name: cleanRelPath,
             content: fileContent,
@@ -2250,27 +2266,40 @@ export default function App() {
         }
       }
 
-      // 2. Otherwise use sessions.files.set({ sessionKey, path: fullWorkspacePath, content })
+      // Session file writes require the revision of the original contents, never the draft.
       if (!isCurrent()) return;
       if (!saved) {
+        const expectedHash = savedFileHash ?? (await hashWorkspaceText(savedFileContent));
+        if (!isCurrent()) return;
         const fullTarget = cleanRelPath.startsWith('/')
           ? cleanRelPath
           : `${workspaceRootPath}/${cleanRelPath}`;
-        await api.request('sessions.files.set', {
+        savedResult = await api.request('sessions.files.set', {
           sessionKey: toGatewaySessionKey(selectedAgentId, selectedSessionKey),
           path: fullTarget,
           content: fileContent,
+          expectedHash,
         });
       }
 
       if (!isCurrent()) return;
       setSavedFileContent(fileContent);
+      setSavedFileHash(workspaceFileHash(savedResult));
       setFileStatusMsg(
         `✓ Saved ${cleanRelPath} (${(new Blob([fileContent]).size / 1024).toFixed(1)} KB)`
       );
       await loadWorkspaceFilesList(selectedAgentId, currentDir);
     } catch (err: any) {
-      if (isCurrent()) setFileStatusMsg(`Failed to save: ${err?.message || 'Unknown error'}`);
+      if (isCurrent()) {
+        const message = err?.message || 'Unknown error';
+        setFileStatusMsg(
+          /session file changed|session_file_conflict|agent_file_conflict|hash.*(?:mismatch|conflict)/i.test(
+            message
+          )
+            ? 'File changed on the Gateway. Your edits are still here; copy them before reloading and merging the changes.'
+            : `Failed to save: ${message}`
+        );
+      }
     } finally {
       if (saveSeq === workspaceSaveSeqRef.current) setSavingFile(false);
     }
@@ -2290,6 +2319,7 @@ export default function App() {
     setActiveFileName(relPath);
     setFileContent(`# ${raw}\n\n`);
     setSavedFileContent('');
+    setSavedFileHash(undefined);
     setFileStatusMsg(`New file: ${relPath} (press Save or Ctrl+S to write to Gateway)`);
     setNewFileNameInput('');
     setShowNewFileInput(false);
@@ -5079,6 +5109,16 @@ export default function App() {
                         )}
                       </span>
                     </div>
+                    <UpdateSettings
+                      restartBlocked={
+                        fileContent !== savedFileContent ||
+                        savingFile ||
+                        streamingSessionKeys.size > 0 ||
+                        Object.values(drafts).some(
+                          (draft) => draft.text.trim().length > 0 || draft.attachments.length > 0
+                        )
+                      }
+                    />
                     {sysInfo?.encryptedStorage === false && (
                       <div
                         style={{

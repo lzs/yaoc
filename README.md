@@ -21,6 +21,8 @@ YAOC is a small, lightweight, self-contained desktop client designed to have ver
 
 **Requires Windows 11 (x64 or ARM64).** Use `yaoc-x64.exe` for Intel/AMD PCs or `yaoc-arm64.exe` for Windows on ARM. These are portable executables; no application installation is needed. Local build outputs are in `release/` and are excluded from the source repository. Published binaries, when available, belong in GitHub Releases.
 
+For newer official releases, use **Settings → About → Check for updates**. Downloads are verified before you choose **Update and restart**, and YAOC keeps its portable filename and a recovery copy. See [Update and publishing guide](docs/UPDATES.md) for details.
+
 ### Connect to a Gateway
 
 Open Settings, select **Gateway Profiles**, and enter the Gateway endpoint and authentication details. The client accepts `http://`, `https://`, `ws://`, or `wss://` endpoints. Use TLS (`https://`/`wss://`) for remote connections, or connect through a trusted local tunnel. Self-signed certificate bypass is an explicit per-profile option and disables certificate verification.

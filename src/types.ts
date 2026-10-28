@@ -153,6 +153,12 @@ export interface UiSessionState {
   promptTemplates?: PromptTemplate[];
 }
 
+export interface UpdateInfo {
+  version: string;
+  releaseUrl: string;
+  size: number;
+}
+
 declare global {
   const __APP_VERSION_LABEL__: string;
   const __APP_BUILD_TIMESTAMP__: string;
@@ -160,6 +166,9 @@ declare global {
 
   interface Window {
     openclawApi?: {
+      checkForUpdate?: () => Promise<UpdateInfo | null>;
+      downloadUpdate?: () => Promise<void>;
+      installUpdate?: () => Promise<void>;
       getSystemInfo: () => Promise<SystemInfo>;
       loadProfiles: () => Promise<{
         profiles: GatewayProfile[];

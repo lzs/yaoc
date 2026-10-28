@@ -173,8 +173,12 @@ test('same-scope compatibility fallback still saves and preserves newer edits as
   app.view.setFileContent('Original save');
   app.render();
   const pending = app.view.handleSaveWorkspaceFile();
-  await app.settle();
+  for (let attempt = 0; !fallback && attempt < 100; attempt++) await new Promise(setImmediate);
   assert.equal(fallback.content, 'Original save');
+  assert.equal(
+    fallback.expectedHash,
+    require('node:crypto').createHash('sha256').update('').digest('hex')
+  );
   app.view.setFileContent('Newer edits');
   app.render();
   save.resolve({ ok: true });
@@ -200,4 +204,64 @@ test('workspace load fallbacks stop after changing Gateway profiles', async () =
   assert.deepEqual(methods, ['agents.workspace.get']);
   app.render();
   assert.equal(app.view.loadingFile, false, 'Cancelling a stale load must leave the editor usable');
+});
+
+test('session file saves use the original bytes hash and refresh it after repeated saves', async () => {
+  const app = fixture();
+  const hash = (text) => require('node:crypto').createHash('sha256').update(text).digest('hex');
+  let remote = 'Original\r\nUnicode: 例子\n';
+  const expectedHashes = [];
+  app.api.request = async (method, params) => {
+    if (method === 'agents.workspace.get') return { file: { content: remote } };
+    if (method === 'agents.files.set') throw new Error('unsupported file "test_sendbox.txt"');
+    if (method === 'sessions.files.set') {
+      assert.match(params.expectedHash, /^[a-f0-9]{64}$/);
+      expectedHashes.push(params.expectedHash);
+      assert.equal(params.expectedHash, hash(remote));
+      remote = params.content;
+      return { file: { hash: hash(remote) } };
+    }
+    return {};
+  };
+  await app.view.loadWorkspaceFile('main', 'test_sendbox.txt');
+  app.render();
+  app.view.setFileContent('First edit');
+  app.render();
+  await app.view.handleSaveWorkspaceFile();
+  app.render();
+  assert.equal(remote, 'First edit');
+  assert.equal(app.view.savedFileContent, 'First edit');
+  assert.equal(app.view.savedFileHash, hash('First edit'));
+  app.view.setFileContent('Second edit');
+  app.render();
+  await app.view.handleSaveWorkspaceFile();
+  assert.deepEqual(expectedHashes, [hash('Original\r\nUnicode: 例子\n'), hash('First edit')]);
+  assert.equal(remote, 'Second edit');
+});
+
+test('Gateway-provided byte hashes are retained and save conflicts preserve drafts', async () => {
+  const app = fixture();
+  const originalHash = 'b'.repeat(64); // The wire text may omit a UTF-8 BOM that exists on disk.
+  let writes = 0;
+  app.api.request = async (method, params) => {
+    if (method === 'agents.workspace.get')
+      return { file: { content: 'Original', hash: originalHash } };
+    if (method === 'agents.files.set') throw new Error('unsupported file');
+    if (method === 'sessions.files.set') {
+      writes++;
+      assert.equal(params.expectedHash, originalHash);
+      throw new Error('session file changed since it was read');
+    }
+    return {};
+  };
+  await app.view.loadWorkspaceFile('main', 'nested/test.txt');
+  app.render();
+  app.view.setFileContent('Unsaved draft');
+  app.render();
+  await app.view.handleSaveWorkspaceFile();
+  app.render();
+  assert.equal(writes, 1);
+  assert.equal(app.view.fileContent, 'Unsaved draft');
+  assert.equal(app.view.savedFileContent, 'Original');
+  assert.match(app.view.fileStatusMsg, /File changed on the Gateway/);
 });

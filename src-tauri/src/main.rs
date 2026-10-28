@@ -2,6 +2,7 @@
 
 mod efficiency;
 mod storage;
+mod updater;
 mod window_chrome;
 mod window_state;
 
@@ -2104,6 +2105,10 @@ fn log_boot(msg: &str) {
 }
 
 fn main() {
+    if let Err(error) = updater::wait_for_predecessor() {
+        show_startup_error(&error);
+        return;
+    }
     log_boot("main() started");
     #[cfg(target_os = "windows")]
     setup_windows_toast_support();
@@ -2120,6 +2125,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(gw_state)
         .manage(window_state::WindowState::default())
+        .manage(updater::UpdateState::default())
         .on_window_event(|window, event| {
             if window.label() != "main" {
                 return;
@@ -2185,6 +2191,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_system_info,
+            updater::check_for_update,
+            updater::download_update,
+            updater::install_update,
             window_chrome::window_action,
             window_chrome::get_window_maximized,
             load_profiles,

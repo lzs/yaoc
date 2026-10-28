@@ -36,6 +36,11 @@ jobs:
           $bin = (Get-ChildItem -LiteralPath $destination -Directory | Select-Object -First 1).FullName + '\bin'
           $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - run: npm ci
+      - run: npm audit
+      - name: Audit locked Rust dependencies
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit --file src-tauri/Cargo.lock
       - run: npm run check
       - run: npm test
       - run: npm run format:check

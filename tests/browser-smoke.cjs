@@ -78,6 +78,8 @@ async function openApp(browser, options = {}) {
     window.testSaves = [];
     window.testHotkeys = [];
     window.testSessionRows = options.sessionRows;
+    window.testWorkspaceFiles = options.workspaceFiles ? { ...options.workspaceFiles } : null;
+
     window.testWindowActions = [];
     let maximized = Boolean(options.maximized);
     const windowCallbacks = new Set();
@@ -101,6 +103,23 @@ async function openApp(browser, options = {}) {
         arch: 'x64',
         runtime: 'test',
       }),
+      checkForUpdate: async () => {
+        if (window.testUpdateMode === 'error')
+          throw new Error('No update manifest is published yet.');
+        if (window.testUpdateMode === 'current') return null;
+        return {
+          version: '2026.2.0',
+          releaseUrl: 'https://github.com/lzs/yaoc/releases/tag/v2026.2.0',
+          size: 1024,
+        };
+      },
+      downloadUpdate: async () => {
+        if (window.testUpdateMode === 'bad-download')
+          throw new Error('Update integrity verification failed; nothing was installed');
+      },
+      installUpdate: async () => {
+        window.testUpdateInstalled = true;
+      },
       loadProfiles: async () => {
         if (options.loadError) throw new Error('Unreadable profile fixture');
         return {
@@ -140,6 +159,48 @@ async function openApp(browser, options = {}) {
       },
       request: async (method, params) => {
         window.testRequests.push({ method, params });
+        if (
+          window.testWorkspaceFiles &&
+          /^(?:agents\.(?:workspace|files)|sessions\.files)\./.test(method)
+        ) {
+          const files = window.testWorkspaceFiles;
+          const hash = async (text) =>
+            Array.from(
+              new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))),
+              (byte) => byte.toString(16).padStart(2, '0')
+            ).join('');
+          const name = (params.path || params.name || '').replace(/^\/workspace\//, '');
+          if (method === 'agents.files.list')
+            return {
+              workspace: '/workspace',
+              files: Object.keys(files).map((name) => ({ name, path: name })),
+            };
+          if (method === 'agents.workspace.list')
+            return {
+              entries: Object.keys(files).map((name) => ({ name, path: name, kind: 'file' })),
+            };
+          if (method === 'agents.workspace.get' || method === 'agents.files.get') {
+            if (!(name in files)) throw new Error('File not found');
+            return {
+              file: { content: files[name], size: new TextEncoder().encode(files[name]).length },
+            };
+          }
+          if (method === 'agents.files.set' && name !== 'AGENTS.md')
+            throw new Error(`unsupported file "${name}"`);
+          if (method === 'sessions.files.set') {
+            if (!/^[a-f0-9]{64}$/.test(params.expectedHash || ''))
+              throw new Error(
+                "invalid sessions.files.set params: must have required property 'expectedHash'"
+              );
+            if (params.expectedHash !== (await hash(files[name])))
+              throw new Error('session file changed since it was read');
+          }
+          if (method === 'agents.files.set' || method === 'sessions.files.set') {
+            files[name] = params.content;
+            return { file: { hash: await hash(params.content) } };
+          }
+        }
+
         if (method === 'agents.list') return { agents: [{ id: 'main', name: 'Assistant' }] };
         if (method === 'sessions.list')
           return {
@@ -229,6 +290,109 @@ async function openApp(browser, options = {}) {
       : {}),
   });
   try {
+    {
+      const updates = await openApp(browser, {
+        sessionRows: [
+          { key: 'main', agentId: 'main' },
+          { key: 'other', agentId: 'main' },
+        ],
+      });
+      const composer = updates.getByRole('textbox', { name: 'Message Assistant', exact: true });
+      await updates.locator('.message-body').waitFor();
+      const originalSession = await updates
+        .locator('.session-item.active .session-key')
+        .innerText();
+      await composer.fill('Draft in another session');
+      await updates.locator('.session-item').filter({ hasText: 'other' }).click();
+      assert.equal(await composer.inputValue(), '');
+      const openUpdates = async () => {
+        await updates.keyboard.press('Control+,');
+        await updates.getByRole('tab', { name: 'About', exact: true }).click();
+        await updates.getByRole('button', { name: 'Check for updates', exact: true }).click();
+        await updates.getByRole('button', { name: 'Download update', exact: true }).click();
+        await updates.getByText('Download verified. Ready to update and restart.').waitFor();
+      };
+      await openUpdates();
+      assert.equal(
+        await updates.getByRole('button', { name: 'Update and restart', exact: true }).isDisabled(),
+        true
+      );
+      await updates.getByText(/Save file changes, send or clear drafts/).waitFor();
+      await updates.keyboard.press('Escape');
+      await updates.locator('.session-item').filter({ hasText: originalSession }).first().click();
+      assert.equal(await composer.inputValue(), 'Draft in another session');
+      await composer.fill('');
+      await openUpdates();
+      updates.once('dialog', (dialog) => dialog.accept());
+      await updates.getByRole('button', { name: 'Update and restart', exact: true }).click();
+      await updates.waitForFunction(() => window.testUpdateInstalled === true);
+      await updates.close();
+    }
+    for (const theme of ['dark', 'light']) {
+      const page = await openApp(browser, {
+        theme,
+        workspaceFiles: {
+          'AGENTS.md': 'Core original',
+          'test_sendbox.txt': 'Original\r\nUnicode: 例子\n',
+        },
+      });
+      await page.locator('.message-body').waitFor();
+      await page.getByTitle('Toggle Agent Workspace Files Editor', { exact: true }).click();
+      const editor = page.locator('.editor-textarea');
+      await page
+        .locator('.workspace-tree-list')
+        .getByTitle('test_sendbox.txt', { exact: true })
+        .click();
+      await page.waitForFunction(() =>
+        document.querySelector('.editor-textarea')?.value.includes('Unicode: 例子')
+      );
+      await editor.fill('First text edit');
+      await editor.press('Control+s');
+      await page.waitForFunction(
+        () => window.testWorkspaceFiles['test_sendbox.txt'] === 'First text edit'
+      );
+      const save = page.getByTitle('Save to Workspace (Ctrl+S)', { exact: true });
+      await page.waitForFunction(
+        () => document.querySelector('[title="Save to Workspace (Ctrl+S)"]').disabled
+      );
+      await editor.fill('Second text edit');
+      await save.click();
+      await page.waitForFunction(
+        () => window.testWorkspaceFiles['test_sendbox.txt'] === 'Second text edit'
+      );
+      await page.waitForFunction(
+        () => document.querySelector('[title="Save to Workspace (Ctrl+S)"]').disabled
+      );
+      assert.equal(
+        await page.evaluate(
+          () => window.testRequests.filter((r) => r.method === 'sessions.files.set').length
+        ),
+        2
+      );
+      await page.evaluate(() => {
+        window.testWorkspaceFiles['test_sendbox.txt'] = 'Changed externally';
+      });
+      await editor.fill('Local unsaved edit');
+      await save.click();
+      await page.getByText('File changed on the Gateway.', { exact: false }).waitFor();
+      assert.equal(await editor.inputValue(), 'Local unsaved edit');
+      assert.equal(
+        await page.evaluate(() => window.testWorkspaceFiles['test_sendbox.txt']),
+        'Changed externally'
+      );
+      page.once('dialog', (dialog) => dialog.accept());
+      await page
+        .locator('.file-tabs')
+        .getByRole('button', { name: 'AGENTS.md', exact: true })
+        .click();
+      await page.waitForFunction(
+        () => document.querySelector('.editor-textarea')?.value === 'Core original'
+      );
+      await editor.fill('Core edited');
+      await save.click();
+      await page.waitForFunction(() => window.testWorkspaceFiles['AGENTS.md'] === 'Core edited');
+      await page.close();
+    }
     for (const theme of ['dark', 'light']) {
       const page = await openApp(browser, { theme, maximized: true });
       const header = page.locator('.integrated-titlebar');
@@ -587,9 +751,44 @@ async function openApp(browser, options = {}) {
       );
       const about = page.getByRole('tabpanel', { name: 'About', exact: true });
       await about.getByText('Build & Version Info', { exact: true }).waitFor();
-      await about.getByText('Beta / Testing', { exact: true }).waitFor();
+      await about
+        .getByText(process.env.YAOC_TEST_OFFICIAL === '1' ? 'Official Release' : 'Beta / Testing', {
+          exact: true,
+        })
+        .waitFor();
       const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'))).version;
       await about.getByText(appVersion, { exact: true }).waitFor();
+      await about.getByRole('button', { name: 'Check for updates', exact: true }).click();
+      await about.getByText(/YAOC 2026.2.0 is available/).waitFor();
+      await page.evaluate(() => {
+        window.testUpdateMode = 'bad-download';
+      });
+      await about.getByRole('button', { name: 'Download update', exact: true }).click();
+      await about.getByRole('alert').filter({ hasText: 'integrity verification failed' }).waitFor();
+      assert.equal(
+        await about.getByRole('button', { name: 'Update and restart', exact: true }).count(),
+        0
+      );
+      await page.evaluate(() => {
+        window.testUpdateMode = 'available';
+      });
+      await about.getByRole('button', { name: 'Download update', exact: true }).click();
+      await about.getByText('Download verified. Ready to update and restart.').waitFor();
+      // A cancelled restart must never invoke the install command.
+      page.once('dialog', (dialog) => dialog.dismiss());
+      await about.getByRole('button', { name: 'Update and restart', exact: true }).click();
+      assert.equal(await page.evaluate(() => window.testUpdateInstalled), undefined);
+      await page.evaluate(() => {
+        window.testUpdateMode = 'current';
+      });
+      await about.getByRole('button', { name: 'Check for updates', exact: true }).click();
+      await about.getByText('You are up to date with official releases.').waitFor();
+      await page.evaluate(() => {
+        window.testUpdateMode = 'error';
+      });
+      await about.getByRole('button', { name: 'Check for updates', exact: true }).click();
+      await about.getByRole('alert').filter({ hasText: 'No update manifest' }).waitFor();
+      await page.getByRole('tab', { name: 'About', exact: true }).focus();
       await page.keyboard.press('ArrowDown');
       assert.equal(
         await page.getByRole('tab', { name: 'General', exact: true }).getAttribute('aria-selected'),
