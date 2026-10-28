@@ -1,6 +1,6 @@
 {
   "name": "yaoc",
-  "version": "2026.1.0-dev10281925",
+  "version": "2026.1.0-dev10282040",
   "description": "Lightweight, non-blocking OpenClaw Gateway Chat & Workspace Client for Windows (x64 & ARM64)",
   "private": true,
   "scripts": {

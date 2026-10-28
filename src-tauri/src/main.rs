@@ -226,20 +226,19 @@ fn normalize_gateway_url(raw: &str) -> String {
     if trimmed.is_empty() {
         return "ws://127.0.0.1:18789".to_string();
     }
-    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("mock://") {
-        return format!("mock://{}", &trimmed[7..]);
-    }
-    if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("ws://") {
-        return format!("ws://{}", &trimmed[5..]);
-    }
-    if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("wss://") {
-        return format!("wss://{}", &trimmed[6..]);
-    }
-    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("http://") {
-        return format!("ws://{}", &trimmed[7..]);
-    }
-    if trimmed.len() >= 8 && trimmed[..8].eq_ignore_ascii_case("https://") {
-        return format!("wss://{}", &trimmed[8..]);
+    for (prefix, replacement) in [
+        ("mock://", "mock://"),
+        ("ws://", "ws://"),
+        ("wss://", "wss://"),
+        ("http://", "ws://"),
+        ("https://", "wss://"),
+    ] {
+        if trimmed
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        {
+            return format!("{replacement}{}", &trimmed[prefix.len()..]);
+        }
     }
     let candidate = format!("wss://{trimmed}");
     if let Ok(parsed) = url::Url::parse(&candidate) {
@@ -2277,6 +2276,19 @@ mod tests {
         assert!(!state.disconnect_connection(Some(old_epoch), None).await);
         assert!(state.ws_tx.lock().await.is_some());
     }
+    #[test]
+    fn unicode_gateway_endpoints_do_not_panic() {
+        for (input, expected) in [
+            ("ws://例子.com", "ws://例子.com"),
+            ("WSS://例子.com/聊天", "wss://例子.com/聊天"),
+            ("https://例子.com", "wss://例子.com"),
+            ("例子.com", "wss://例子.com"),
+            ("🔒网关", "wss://🔒网关"),
+        ] {
+            assert_eq!(normalize_gateway_url(input), expected);
+        }
+    }
+
     #[test]
     fn hotkey_parser_and_url_normalization() {
         let hotkey = parse_win32_hotkey("Alt+Shift+3").unwrap().unwrap();

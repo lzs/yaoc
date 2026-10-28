@@ -85,6 +85,16 @@ Raw executables are `src-tauri/target/<target-triple>/release/yaoc.exe`. Packagi
 
 The root `.cargo/config.toml` supplies both LLVM-MinGW linkers and `-C target-feature=+crt-static`. This avoids a separate `libunwind.dll`. The patched `webview2-com-sys` crate embeds the architecture-specific WebView2 loader. Windows system DLLs and the installed WebView2 Runtime remain runtime dependencies. Do not remove the patch or change `dragDropEnabled: false` without testing attachment drag-and-drop.
 
+## Pre-release validation
+
+Start with `npm.cmd ci` so installed frontend tools match the lockfile. Run the checks above, `npm.cmd audit`, and `cargo audit --file src-tauri/Cargo.lock`; inspect informational advisories against the actual Windows dependency graph. Regenerate notices with `npm.cmd run notices`; a missing license text fails generation and must be resolved before packaging.
+
+Keep test builds in Beta until native validation is complete. On Windows 11 ARM64, launch `release/yaoc-arm64.exe` from a clean directory alongside the distribution notices and confirm its About version matches the build being tested. Check the integrated header, dragging/resizing, maximize/restore, minimize, close-to-tray, global shortcut, and restart geometry in both themes.
+
+Use a dedicated test session and disposable workspace file for real-Gateway testing: pairing/reconnect, streaming and stop, attachments, approvals, model/reasoning changes, and workspace save/load. Also switch sessions while Reset is pending, and switch files or reconnect while Save is pending; completion must not replace another transcript, saved baseline, or Gateway's data. Native ARM64 and real-Gateway checks require manual validation when the build machine cannot provide them.
+
+After validation, explicitly build the official version, regenerate notices, package both architectures, verify `SHA256SUMS.txt`, and publish the intended commits and artifacts. Code signing is not configured; do not describe an unsigned binary as signed. Beta artifacts and official artifacts must not be mixed.
+
 ## Maintaining icons
 
 Edit `src/assets/yaoc.svg` and run `npm.cmd run icons`. Sharp is a declared development dependency; generated PNG and ICO assets are checked in under `src-tauri/icons/`. Rebuild the app after changing them. The ICO contains 16, 24, 32, 48, 64, 128, and 256px images.

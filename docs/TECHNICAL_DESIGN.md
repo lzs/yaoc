@@ -421,6 +421,12 @@ Named session keys are folded to lowercase before storage, comparison, and RPCs,
 
 Creating a session while connected also sends `sessions.patch` with the canonical key and the original display label. The Gateway therefore owns the label and capitalization, which YAOC reads back from `sessions.list` after restarting. Selecting an existing session does not overwrite its label. A rejected or failed label write leaves the local session usable and reports that the name was not saved. Offline creation remains local until the user saves its label with Rename while connected.
 
+### Async request isolation
+
+Session rosters, chat history, workspace directory/file loads, saves, and resets capture the selected profile, agent, and connection generation. Every connection status event and explicit connect/disconnect invalidates earlier work, including reconnects to the same profile. Compatibility fallbacks stop when the scope changes. Session-list responses also check request order and the selection that was active when the request began; superseded results return no selection so chained refreshes stop.
+
+Workspace save completion checks the file-load generation, filename, and latest save request before updating the saved baseline or status. Edits made to the same file while saving remain dirty against the content actually sent. Reset success/failure only updates the transcript if its canonical session is still selected, and roster refresh preserves the current selection rather than returning to the reset session. Successful reset invalidates older chat-history responses. Endpoint scheme recognition uses UTF-8 boundary-safe prefix checks so international hostnames cannot panic the native process.
+
 ### Integrated title bar
 
 `TitleBar.tsx` reuses the 52px application header and its 24px logo as window chrome. Non-macOS windows disable native decorations before restoring geometry and becoming visible. Empty header areas initiate native window dragging; a double-click requests maximize/restore, while interactive controls are excluded. Dedicated minimize, maximize/restore, and close buttons use an allowlisted Rust `window_action` command through the frozen bridge. Closing still goes through the existing CloseRequested handler and tray policy. Resize/focus events publish maximized state to keep the restore icon synchronized, including changes made through the OS.

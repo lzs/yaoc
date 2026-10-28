@@ -16,15 +16,17 @@ function add(name, version, directory, license) {
     ? 'node_modules/esbuild/LICENSE.md'
     : name.startsWith('@rollup/rollup-')
       ? 'node_modules/rollup/LICENSE.md'
-      : name === 'webview2-com'
-        ? 'src-tauri/vendor/webview2-com-sys/LICENSE'
-        : name === 'webview2-com-macros'
-          ? 'third-party-licenses/webview2-com-macros-LICENSE.txt'
-          : name === 'alloc-stdlib'
-            ? 'third-party-licenses/alloc-stdlib-LICENSE.txt'
-            : name === 'selectors'
-              ? 'third-party-licenses/selectors-LICENSE.txt'
-              : null;
+      : name === 'tauri-plugin'
+        ? 'third-party-licenses/tauri-plugin-LICENSE.txt'
+        : name === 'webview2-com'
+          ? 'src-tauri/vendor/webview2-com-sys/LICENSE'
+          : name === 'webview2-com-macros'
+            ? 'third-party-licenses/webview2-com-macros-LICENSE.txt'
+            : name === 'alloc-stdlib'
+              ? 'third-party-licenses/alloc-stdlib-LICENSE.txt'
+              : name === 'selectors'
+                ? 'third-party-licenses/selectors-LICENSE.txt'
+                : null;
   if (!texts.length && fallback) texts.push(fs.readFileSync(path.join(root, fallback), 'utf8'));
   if (!texts.length) missing.push(id);
   records.set(
@@ -87,7 +89,7 @@ fs.writeFileSync(
 );
 console.log(`Wrote notices for ${records.size} packages/files.`);
 if (missing.length)
-  console.warn(
-    'Packages without a top-level license file (review before redistribution): ' +
+  throw new Error(
+    'Packages without a top-level license file (required before redistribution): ' +
       missing.sort().join(', ')
   );

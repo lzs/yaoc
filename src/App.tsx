@@ -886,6 +886,31 @@ export default function App() {
   const activeProfile = profiles.find((p) => p.id === activeProfileId) || profiles[0];
   const activeProfileIdRef = useRef(activeProfileId);
   activeProfileIdRef.current = activeProfileId;
+  const selectedAgentIdRef = useRef(selectedAgentId);
+  selectedAgentIdRef.current = selectedAgentId;
+  const connectionGenerationRef = useRef(0);
+  const sessionListSeqRef = useRef(0);
+  const workspaceListSeqRef = useRef(0);
+  const workspaceSaveSeqRef = useRef(0);
+  const workspaceFileNameRef = useRef(activeFileName);
+  workspaceFileNameRef.current = activeFileName;
+
+  function captureGatewayScope(agentId = selectedAgentIdRef.current) {
+    return {
+      profileId: activeProfileIdRef.current,
+      agentId,
+      generation: connectionGenerationRef.current,
+    };
+  }
+
+  function isGatewayScopeCurrent(scope: ReturnType<typeof captureGatewayScope>) {
+    return (
+      scope.profileId === activeProfileIdRef.current &&
+      scope.agentId === selectedAgentIdRef.current &&
+      scope.generation === connectionGenerationRef.current
+    );
+  }
+
   const activeGatewaySessionKeyRef = useRef(
     toGatewaySessionKey(selectedAgentId, selectedSessionKey)
   );
@@ -1107,6 +1132,7 @@ export default function App() {
     if (!api) return;
 
     const unsubStatus = api.onStatus((status) => {
+      ++connectionGenerationRef.current;
       setConnStatus(status);
       if (status.state !== 'connected') {
         for (const timer of streamingTimeoutsRef.current.values()) clearTimeout(timer);
@@ -1730,9 +1756,16 @@ export default function App() {
   async function fetchSessionsAndSyncSelection(
     currentAgent: string,
     preferredSessionKey: string
-  ): Promise<string> {
+  ): Promise<string | null> {
     const api = window.openclawApi;
     if (!api) return preferredSessionKey;
+    const scope = captureGatewayScope(currentAgent);
+    const requestSeq = ++sessionListSeqRef.current;
+    const startingSelection = activeGatewaySessionKeyRef.current;
+    const isCurrent = () =>
+      isGatewayScopeCurrent(scope) &&
+      requestSeq === sessionListSeqRef.current &&
+      startingSelection === activeGatewaySessionKeyRef.current;
 
     let sessRes: any = null;
     try {
@@ -1742,16 +1775,18 @@ export default function App() {
         includeDerivedTitles: true,
       });
     } catch {
+      if (!isCurrent()) return null;
       try {
         sessRes = await api.request('sessions.list', {
           agentId: currentAgent,
           limit: 100,
         });
       } catch {
-        return preferredSessionKey;
+        return isCurrent() ? preferredSessionKey : null;
       }
     }
 
+    if (!isCurrent()) return null;
     if (Array.isArray(sessRes?.sessions)) {
       const list: SessionInfo[] = normalizeSessions(
         sessRes.sessions.length > 0
@@ -1777,7 +1812,7 @@ export default function App() {
       const preferredKey = toGatewaySessionKey(currentAgent, preferredSessionKey);
       const resolvedKey =
         list.find((session) => session.key === preferredKey)?.key || list[0]?.key || preferredKey;
-      if (resolvedKey !== selectedSessionKey) {
+      if (resolvedKey !== activeGatewaySessionKeyRef.current) {
         // History can resolve before React commits the selection (for example with a fast Gateway).
         activeGatewaySessionKeyRef.current = resolvedKey;
         uiStateRef.current = { ...uiStateRef.current, selectedSessionKey: resolvedKey };
@@ -1791,6 +1826,7 @@ export default function App() {
 
   async function handleRefreshSessions() {
     const api = window.openclawApi;
+    let scope = captureGatewayScope();
     if (!api || connStatus.state !== 'connected' || refreshingSessions) return;
     setRefreshingSessions(true);
     const minSpin = new Promise((r) => setTimeout(r, 300));
@@ -1798,21 +1834,26 @@ export default function App() {
       let currentAgent = selectedAgentId || 'main';
       try {
         const agentsRes = await api.request('agents.list', {});
+        if (!isGatewayScopeCurrent(scope)) return;
         if (Array.isArray(agentsRes?.agents) && agentsRes.agents.length > 0) {
           setAgents(agentsRes.agents);
           if (!agentsRes.agents.some((a: any) => a.id === currentAgent)) {
             currentAgent = agentsRes.defaultId || agentsRes.agents[0].id;
+            selectedAgentIdRef.current = currentAgent;
             setSelectedAgentId(currentAgent);
+            scope = captureGatewayScope(currentAgent);
           }
         }
       } catch {
         // Ignore if agents.list is restricted
       }
 
+      if (!isGatewayScopeCurrent(scope)) return;
       const resolvedSessionKey = await fetchSessionsAndSyncSelection(
         currentAgent,
         selectedSessionKey || 'main'
       );
+      if (!resolvedSessionKey || !isGatewayScopeCurrent(scope)) return;
       await loadChatHistory(resolvedSessionKey, currentAgent);
     } finally {
       await minSpin;
@@ -1822,6 +1863,7 @@ export default function App() {
 
   async function refreshGatewayState(agentOverride?: string, sessionOverride?: string) {
     const api = window.openclawApi;
+    let scope = captureGatewayScope(agentOverride || selectedAgentIdRef.current);
     if (!api) return;
 
     // Subscribe to live session roster updates if supported by Gateway
@@ -1833,27 +1875,34 @@ export default function App() {
     let currentAgent = agentOverride || savedUi.selectedAgentId || selectedAgentId || 'main';
     try {
       const agentsRes = await api.request('agents.list', {});
+      if (!isGatewayScopeCurrent(scope)) return;
       if (Array.isArray(agentsRes?.agents) && agentsRes.agents.length > 0) {
         setAgents(agentsRes.agents);
         const hasCurrent = agentsRes.agents.some((a: any) => a.id === currentAgent);
         if (!agentOverride && !hasCurrent) {
           currentAgent = agentsRes.defaultId || agentsRes.agents[0].id;
+          selectedAgentIdRef.current = currentAgent;
           setSelectedAgentId(currentAgent);
+          scope = captureGatewayScope(currentAgent);
         }
       }
     } catch {
       // Fallback to currentAgent if agents.list is restricted
     }
 
+    if (!isGatewayScopeCurrent(scope)) return;
     const preferredSession =
       sessionOverride || selectedSessionKey || savedUi.selectedSessionKey || 'main';
     const resolvedSessionKey = await fetchSessionsAndSyncSelection(currentAgent, preferredSession);
 
+    if (!resolvedSessionKey || !isGatewayScopeCurrent(scope)) return;
     const targetDir = typeof savedUi.currentDir === 'string' ? savedUi.currentDir : currentDir;
     const targetFile = savedUi.activeFileName || activeFileName || 'AGENTS.md';
 
     await loadChatHistory(resolvedSessionKey, currentAgent);
+    if (!isGatewayScopeCurrent(scope)) return;
     await loadWorkspaceFilesList(currentAgent, targetDir);
+    if (!isGatewayScopeCurrent(scope)) return;
     await loadWorkspaceFile(currentAgent, targetFile);
   }
 
@@ -1862,10 +1911,15 @@ export default function App() {
     if (!api) return;
     saveCurrentSessionScrollPosition();
     const scrollKey = toGatewaySessionKey(agentOverride || selectedAgentId || 'main', sessionKey);
+    const scope = captureGatewayScope(agentOverride || selectedAgentIdRef.current);
     const reqSeq = ++chatHistorySeqRef.current;
     try {
       const res = await api.request('chat.history', { sessionKey: scrollKey, limit: 100 });
-      if (reqSeq !== chatHistorySeqRef.current || scrollKey !== activeGatewaySessionKeyRef.current)
+      if (
+        !isGatewayScopeCurrent(scope) ||
+        reqSeq !== chatHistorySeqRef.current ||
+        scrollKey !== activeGatewaySessionKeyRef.current
+      )
         return;
       const rawMessages = Array.isArray(res?.messages) ? res.messages : [];
 
@@ -2006,6 +2060,10 @@ export default function App() {
   async function loadWorkspaceFilesList(agentId: string, dirPath = '') {
     const api = window.openclawApi;
     if (!api) return;
+    const scope = captureGatewayScope(agentId);
+    const requestSeq = ++workspaceListSeqRef.current;
+    const isCurrent = () =>
+      isGatewayScopeCurrent(scope) && requestSeq === workspaceListSeqRef.current;
 
     const cleanDir = dirPath.replace(/^\/+|\/+$/g, '');
     setCurrentDir(cleanDir);
@@ -2014,6 +2072,7 @@ export default function App() {
     const sizeMap = new Map<string, number>();
     try {
       const filesRes = await api.request('agents.files.list', { agentId });
+      if (!isCurrent()) return;
       if (filesRes?.workspace) {
         setWorkspaceRootPath(String(filesRes.workspace).replace(/\/+$/, ''));
       }
@@ -2025,6 +2084,7 @@ export default function App() {
         }
       }
     } catch {
+      if (!isCurrent()) return;
       // Ignore
     }
 
@@ -2033,6 +2093,7 @@ export default function App() {
       const wsParams: Record<string, any> = { agentId };
       if (cleanDir) wsParams.path = cleanDir;
       const wsRes = await api.request('agents.workspace.list', wsParams);
+      if (!isCurrent()) return;
       if (Array.isArray(wsRes?.entries)) {
         const mapped: WorkspaceFileEntry[] = wsRes.entries.map((e: any) => ({
           name: e.name || e.path.split('/').pop() || e.path,
@@ -2053,12 +2114,14 @@ export default function App() {
         return;
       }
     } catch {
+      if (!isCurrent()) return;
       // Fallback if agents.workspace.list is not supported
     }
 
     // 3. Fallback to agents.files.list
     try {
       const res = await api.request('agents.files.list', { agentId });
+      if (!isCurrent()) return;
       const list: WorkspaceFileEntry[] = Array.isArray(res?.files)
         ? res.files.map((f: any) => ({
             name: f.name || f.path,
@@ -2071,6 +2134,7 @@ export default function App() {
         : [];
       setWorkspaceFiles(list);
     } catch {
+      if (!isCurrent()) return;
       setWorkspaceFiles(
         STANDARD_WORKSPACE_FILES.map((name) => ({ name, path: name, kind: 'file' }))
       );
@@ -2080,7 +2144,14 @@ export default function App() {
   async function loadWorkspaceFile(agentId: string, relativePath: string) {
     const api = window.openclawApi;
     if (!api || !relativePath) return;
+    const scope = captureGatewayScope(agentId);
     const reqSeq = ++workspaceFileSeqRef.current;
+    const dropStaleLoad = () => {
+      if (isGatewayScopeCurrent(scope) && reqSeq === workspaceFileSeqRef.current) return false;
+      // A superseded file load must not clear a newer load's spinner.
+      if (reqSeq === workspaceFileSeqRef.current) setLoadingFile(false);
+      return true;
+    };
     setLoadingFile(true);
     setFileStatusMsg('');
 
@@ -2092,7 +2163,7 @@ export default function App() {
         agentId,
         path: cleanRelPath,
       });
-      if (reqSeq !== workspaceFileSeqRef.current) return;
+      if (dropStaleLoad()) return;
       const text = res?.file?.content ?? res?.content ?? '';
       const bytes = res?.file?.size ?? new Blob([text]).size;
       setActiveFileName(cleanRelPath);
@@ -2102,7 +2173,7 @@ export default function App() {
       setLoadingFile(false);
       return;
     } catch {
-      if (reqSeq !== workspaceFileSeqRef.current) return;
+      if (dropStaleLoad()) return;
       // Fall through to agents.files.get
     }
 
@@ -2112,7 +2183,7 @@ export default function App() {
         agentId,
         name: cleanRelPath,
       });
-      if (reqSeq !== workspaceFileSeqRef.current) return;
+      if (dropStaleLoad()) return;
       const text = res?.file?.content ?? res?.content ?? '';
       const bytes = res?.file?.size ?? new Blob([text]).size;
       setActiveFileName(cleanRelPath);
@@ -2122,7 +2193,7 @@ export default function App() {
       setLoadingFile(false);
       return;
     } catch (err: any) {
-      if (reqSeq !== workspaceFileSeqRef.current) return;
+      if (dropStaleLoad()) return;
       setActiveFileName(cleanRelPath);
       setFileContent('');
       setSavedFileContent('');
@@ -2148,6 +2219,14 @@ export default function App() {
   async function handleSaveWorkspaceFile() {
     const api = window.openclawApi;
     if (!api || !activeFileName) return;
+    const scope = captureGatewayScope();
+    const fileSeq = workspaceFileSeqRef.current;
+    const saveSeq = ++workspaceSaveSeqRef.current;
+    const isCurrent = () =>
+      isGatewayScopeCurrent(scope) &&
+      fileSeq === workspaceFileSeqRef.current &&
+      activeFileName === workspaceFileNameRef.current &&
+      saveSeq === workspaceSaveSeqRef.current;
     setSavingFile(true);
     setFileStatusMsg('');
 
@@ -2166,11 +2245,13 @@ export default function App() {
           });
           saved = true;
         } catch {
+          if (!isCurrent()) return;
           // Fall through to sessions.files.set for arbitrary root files
         }
       }
 
       // 2. Otherwise use sessions.files.set({ sessionKey, path: fullWorkspacePath, content })
+      if (!isCurrent()) return;
       if (!saved) {
         const fullTarget = cleanRelPath.startsWith('/')
           ? cleanRelPath
@@ -2182,15 +2263,16 @@ export default function App() {
         });
       }
 
+      if (!isCurrent()) return;
       setSavedFileContent(fileContent);
       setFileStatusMsg(
         `✓ Saved ${cleanRelPath} (${(new Blob([fileContent]).size / 1024).toFixed(1)} KB)`
       );
       await loadWorkspaceFilesList(selectedAgentId, currentDir);
     } catch (err: any) {
-      setFileStatusMsg(`Failed to save: ${err?.message || 'Unknown error'}`);
+      if (isCurrent()) setFileStatusMsg(`Failed to save: ${err?.message || 'Unknown error'}`);
     } finally {
-      setSavingFile(false);
+      if (saveSeq === workspaceSaveSeqRef.current) setSavingFile(false);
     }
   }
 
@@ -2204,6 +2286,7 @@ export default function App() {
     ) {
       return;
     }
+    ++workspaceFileSeqRef.current;
     setActiveFileName(relPath);
     setFileContent(`# ${raw}\n\n`);
     setSavedFileContent('');
@@ -2216,11 +2299,13 @@ export default function App() {
     const api = window.openclawApi;
     const target = profileToUse || activeProfile;
     if (!api || !target) return;
+    ++connectionGenerationRef.current;
     setAutoConnect(true);
     await api.connect(target);
   }
 
   async function handleDisconnect() {
+    ++connectionGenerationRef.current;
     setAutoConnect(false);
     const nextUiState: UiSessionState = {
       ...uiStateRef.current,
@@ -2715,13 +2800,20 @@ export default function App() {
   async function handleResetSession(targetKeyOverride?: string) {
     const targetKey = targetKeyOverride || selectedSessionKey;
     const gatewayKey = toGatewaySessionKey(selectedAgentId, targetKey);
+    const scope = captureGatewayScope();
+    const isCurrentSession = () =>
+      isGatewayScopeCurrent(scope) && activeGatewaySessionKeyRef.current === gatewayKey;
     setSessionMenu(null);
     if (connStatus.state !== 'connected') return;
     try {
-      await window.openclawApi?.request('sessions.reset', {
+      const result = await window.openclawApi?.request('sessions.reset', {
         key: gatewayKey,
       });
-      if (targetKey === selectedSessionKey) {
+      if (!isGatewayScopeCurrent(scope)) return;
+      if (result?.ok === false)
+        throw new Error(result.error?.message || 'The Gateway rejected the reset');
+      if (isCurrentSession()) {
+        ++chatHistorySeqRef.current;
         visitedSessionsRef.current.add(gatewayKey);
         sessionScrollTopRef.current.set(gatewayKey, 0);
         loadedSessionKeyRef.current = gatewayKey;
@@ -2735,10 +2827,10 @@ export default function App() {
           },
         ]);
       }
-      await fetchSessionsAndSyncSelection(selectedAgentId || 'main', targetKey);
+      await fetchSessionsAndSyncSelection(scope.agentId, activeGatewaySessionKeyRef.current);
     } catch (err: any) {
       const errMsg = err?.message || String(err);
-      if (targetKey === selectedSessionKey) {
+      if (isCurrentSession()) {
         setMessages((prev) => [
           ...prev,
           {
@@ -3115,6 +3207,7 @@ export default function App() {
               agents={agents}
               selectedAgentId={selectedAgentId}
               onSelectAgent={(nextAgent) => {
+                selectedAgentIdRef.current = nextAgent;
                 setSelectedAgentId(nextAgent);
                 if (connStatus.state === 'connected') {
                   refreshGatewayState(nextAgent, selectedSessionKey);
@@ -5559,6 +5652,7 @@ export default function App() {
           handleSendMessage('/reset');
         }}
         onSelectAgent={(agentId) => {
+          selectedAgentIdRef.current = agentId;
           setSelectedAgentId(agentId);
           if (connStatus.state === 'connected') {
             refreshGatewayState(agentId, selectedSessionKey);
