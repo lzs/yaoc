@@ -421,6 +421,10 @@ Named session keys are folded to lowercase before storage, comparison, and RPCs,
 
 Creating a session while connected also sends `sessions.patch` with the canonical key and the original display label. The Gateway therefore owns the label and capitalization, which YAOC reads back from `sessions.list` after restarting. Selecting an existing session does not overwrite its label. A rejected or failed label write leaves the local session usable and reports that the name was not saved. Offline creation remains local until the user saves its label with Rename while connected.
 
+### Chat action feedback
+
+Reload and Reset use icon buttons with themed tooltips below the controls. Tooltips appear after a short hover/focus delay and dismiss with Escape. Actions show a pressed state and a spinning icon while pending, with a 400ms minimum feedback duration; repeat clicks and the other header action are blocked until completion. Reduced-motion preferences suppress tooltip motion and icon rotation. Successful system notices use the neutral elevated panel style; messages explicitly marked as errors retain red styling, including errors loaded from history.
+
 ### Default composer focus
 
 The composer receives focus on launch and restores focus when the document has no focused control, including after reconnecting or returning to the window. Explicit focus in other controls, open dialogs and menus, session naming, and transcript text selections takes precedence. Focus recovery preserves the caret and avoids scrolling. Drafting remains available while disconnected; sending and attachments still require a Gateway connection.

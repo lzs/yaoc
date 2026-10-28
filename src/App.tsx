@@ -12,7 +12,6 @@ import {
   FolderOpen,
   Image as ImageIcon,
   Keyboard,
-  MessageSquarePlus,
   MoreHorizontal,
   Plus,
   Pencil,
@@ -60,6 +59,7 @@ import { ToolCallCard } from './ToolCallCard';
 import { RunCompletionTracker } from './runCompletion';
 import KeyboardShortcuts from './KeyboardShortcuts';
 import SessionTokenMeter from './SessionTokenMeter';
+import ChatActionButton from './ChatActionButton';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
 
@@ -602,6 +602,23 @@ export default function App() {
   const [renamingSessionKey, setRenamingSessionKey] = useState<string | null>(null);
   const [renameSessionInput, setRenameSessionInput] = useState<string>('');
   const [refreshingSessions, setRefreshingSessions] = useState<boolean>(false);
+  const [chatAction, setChatAction] = useState<'reload' | 'reset' | null>(null);
+  const chatActionInFlight = useRef(false);
+
+  async function runChatAction(action: 'reload' | 'reset', task: () => Promise<void>) {
+    if (chatActionInFlight.current) return;
+    chatActionInFlight.current = true;
+    setChatAction(action);
+    const feedback = new Promise<void>((resolve) => setTimeout(resolve, 400));
+    try {
+      await task();
+    } finally {
+      await feedback;
+      chatActionInFlight.current = false;
+      setChatAction(null);
+    }
+  }
+
   const localSessionLabelsRef = useRef(new Map<string, string>());
 
   // Chat State
@@ -1955,6 +1972,7 @@ export default function App() {
             thinking: extractThinkingText(m) || undefined,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
             attachments: attachments.length > 0 ? attachments : undefined,
+            error: Boolean(m.error || m.is_error),
             timestamp: m.timestamp || m.ts || Date.now(),
           };
         })
@@ -3108,7 +3126,7 @@ export default function App() {
                   onClick={() => setShowNewSessionInput((v) => !v)}
                   title="New Session"
                 >
-                  <MessageSquarePlus size={12} /> New
+                  <Plus size={12} /> New
                 </button>
                 <button
                   className="btn"
@@ -3212,7 +3230,7 @@ export default function App() {
               aria-keyshortcuts="Control+/"
               title="Show keyboard shortcuts (Ctrl+/)"
             >
-              <Keyboard size={15} aria-hidden="true" />
+              <Keyboard size={13} aria-hidden="true" />
               <span>Shortcuts</span>
               <kbd>Ctrl+/</kbd>
             </button>
@@ -3315,22 +3333,36 @@ export default function App() {
             </div>
 
             <div className="chat-session-actions">
-              <button
-                className="btn"
-                onClick={() => loadChatHistory(selectedSessionKey)}
-                disabled={connStatus.state !== 'connected'}
-                title="Reload messages for this session from the Gateway (chat.history)"
+              <ChatActionButton
+                id="reload-chat"
+                label="Reload chat"
+                busyLabel="Reloading chat…"
+                busy={chatAction === 'reload'}
+                disabled={connStatus.state !== 'connected' || chatAction === 'reset'}
+                onClick={() =>
+                  void runChatAction('reload', () => loadChatHistory(selectedSessionKey))
+                }
               >
-                <RefreshCw size={13} /> Reload Chat
-              </button>
-              <button
-                className="btn"
-                onClick={() => handleResetSession()}
-                disabled={connStatus.state !== 'connected'}
-                title="Reset Session Context"
+                <RefreshCw
+                  size={13}
+                  aria-hidden="true"
+                  className={chatAction === 'reload' ? 'spin-icon' : ''}
+                />
+              </ChatActionButton>
+              <ChatActionButton
+                id="reset-session"
+                label="Reset session context"
+                busyLabel="Resetting session…"
+                busy={chatAction === 'reset'}
+                disabled={connStatus.state !== 'connected' || chatAction === 'reload'}
+                onClick={() => void runChatAction('reset', () => handleResetSession())}
               >
-                <RotateCcw size={13} /> Reset Session
-              </button>
+                <RotateCcw
+                  size={13}
+                  aria-hidden="true"
+                  className={chatAction === 'reset' ? 'spin-icon' : ''}
+                />
+              </ChatActionButton>
             </div>
           </div>
 
@@ -3780,7 +3812,7 @@ export default function App() {
                 return (
                   <div
                     key={m.id}
-                    className={`message-card ${m.role}`}
+                    className={`message-card ${m.role}${m.error ? ' error' : ''}`}
                     role="article"
                     aria-label={
                       m.role === 'user'

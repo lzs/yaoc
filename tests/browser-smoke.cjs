@@ -208,6 +208,86 @@ async function openApp(browser, options = {}) {
       : {}),
   });
   try {
+    for (const theme of ['dark', 'light']) {
+      const page = await openApp(browser, { theme });
+      await page.locator('.message-body').waitFor();
+      const reload = page.getByRole('button', { name: 'Reload chat', exact: true });
+      const reset = page.getByRole('button', { name: 'Reset session context', exact: true });
+      await reload.focus();
+      await page.locator('#reload-chat-tooltip').waitFor({ state: 'visible' });
+      assert.equal(await reload.getAttribute('title'), null);
+      await page.keyboard.press('Escape');
+      await page.locator('#reload-chat-tooltip').waitFor({ state: 'hidden' });
+      await page.evaluate(() => {
+        const request = window.openclawApi.request;
+        window.testActionCalls = [];
+        window.openclawApi.request = (method, params) => {
+          if (method === 'chat.history' || method === 'sessions.reset') {
+            window.testActionCalls.push(method);
+            return new Promise((resolve, reject) => {
+              window.testReleaseAction = resolve;
+              window.testRejectAction = () => reject(new Error('Action denied by fixture'));
+            });
+          }
+          return request(method, params);
+        };
+      });
+      await reload.click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector('[aria-label="Reload chat"]').getAttribute('aria-busy') === 'true'
+      );
+      assert.equal(await reload.locator('.spin-icon').count(), 1);
+      assert.equal(await reset.isDisabled(), true);
+      await reload.evaluate((el) => el.click());
+      assert.equal(await page.evaluate(() => window.testActionCalls.length), 1);
+      await page.evaluate(() => window.testReleaseAction({ messages: [] }));
+      await page.waitForFunction(
+        () =>
+          document.querySelector('[aria-label="Reload chat"]').getAttribute('aria-busy') === 'false'
+      );
+      await reset.click();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[aria-label="Reset session context"]')
+            .getAttribute('aria-busy') === 'true'
+      );
+      assert.equal(await reset.locator('.spin-icon').count(), 1);
+      assert.equal(await reload.isDisabled(), true);
+      await page.evaluate(() => window.testReleaseAction({ ok: true }));
+      const notice = page.locator('.message-card.system').filter({ hasText: 'was reset.' });
+      await notice.waitFor();
+      assert.equal(await notice.evaluate((el) => el.classList.contains('error')), false);
+      assert.equal(
+        await notice.evaluate((el) => getComputedStyle(el).backgroundColor),
+        await page.evaluate(() => {
+          const sample = document.createElement('div');
+          sample.style.background = 'var(--bg-elevated)';
+          document.body.append(sample);
+          const color = getComputedStyle(sample).backgroundColor;
+          sample.remove();
+          return color;
+        })
+      );
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[aria-label="Reset session context"]')
+            .getAttribute('aria-busy') === 'false'
+      );
+      await reset.hover();
+      await page.locator('#reset-session-tooltip').waitFor({ state: 'visible' });
+      await page.screenshot({ path: path.join(root, '.local', `chat-feedback-${theme}.png`) });
+      await reset.click();
+      await page.waitForFunction(() => window.testActionCalls.length === 3);
+      await page.evaluate(() => window.testRejectAction());
+      await page
+        .locator('.message-card.system.error')
+        .filter({ hasText: 'Could not reset session:' })
+        .waitFor();
+      await page.close();
+    }
     {
       const focusPage = await openApp(browser);
       const composer = focusPage.getByRole('textbox', { name: 'Message Assistant', exact: true });

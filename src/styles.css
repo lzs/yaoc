@@ -764,9 +764,14 @@ textarea {
 .message-card.system {
   align-self: center;
   max-width: 92%;
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
+  font-size: 13px;
+}
+
+.message-card.system.error {
   background: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.35);
-  font-size: 13px;
 }
 
 .message-header {
@@ -2299,10 +2304,10 @@ textarea {
 .sidebar-shortcuts {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   width: 100%;
-  margin-bottom: 10px;
-  padding: 7px 6px;
+  margin-bottom: 4px;
+  padding: 7px 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -2967,4 +2972,79 @@ textarea {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Compact chat actions with themed, keyboard-accessible tooltips. */
+.chat-action {
+  position: relative;
+  display: inline-flex;
+}
+
+.chat-action-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.chat-action-button.is-busy {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  cursor: progress;
+}
+
+.chat-action-button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.chat-action-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: max-content;
+  max-width: min(240px, calc(100vw - 32px));
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  box-shadow: 0 4px 14px #0003;
+  font-size: 12px;
+  font-weight: normal;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms;
+}
+
+.chat-action:not([data-tooltip-dismissed]):hover .chat-action-tooltip,
+.chat-action:not([data-tooltip-dismissed]):focus-within .chat-action-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 300ms;
+}
+
+.chat-action-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-action-tooltip,
+  .chat-action-button {
+    transition: none;
+    transform: none;
+  }
+  .chat-action-button .spin-icon {
+    animation: none;
+  }
 }
