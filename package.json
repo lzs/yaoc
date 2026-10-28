@@ -27,7 +27,8 @@
     "updates:keygen": "node scripts/update-keygen.cjs",
     "notices": "node scripts/third-party-notices.cjs",
     "test:browser": "node tests/browser-smoke.cjs",
-    "updates:sign": "node scripts/update-sign.cjs"
+    "updates:sign": "node scripts/update-sign.cjs",
+    "updates:verify": "node scripts/update-verify.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

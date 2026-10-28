@@ -43,6 +43,18 @@ On GitHub, create a draft release for the committed source tagged exactly `v<ver
 
 Asset names stay fixed; version-specific URLs distinguish builds. The client reads `https://github.com/lzs/yaoc/releases/latest/download/latest.json`. Never upload Beta executables under an official manifest. A signature proves identity/integrity, not that a binary was built from the intended source; the publishing process must ensure both.
 
+## Verify a release yourself
+
+From the repository root, run:
+
+```powershell
+npm.cmd run updates:verify -- --dir "release\2026.1.0"
+```
+
+This read-only command verifies `latest.json` against the embedded public identity, verifies both executables' sizes and SHA-256 hashes against the signed payload, checks `SHA256SUMS.txt` agrees, and checks both licence files are present. It requires no private key or passphrase, prints PASS on success, and exits nonzero with an error on failure. The licence files are checked for presence, not authenticated by the signed manifest. ZIP files are not covered by this check.
+
+To check files downloaded from GitHub, put the six release assets in a separate directory and supply that directory with `--dir`. Use a trusted checkout of YAOC for the verifier and its public key; downloading an untrusted replacement public key alongside the files would not establish authenticity. Verification does not launch the app or establish that it is free of bugs or malware.
+
 ## Protocol and maintenance
 
 `latest.json` contains `keyId`, `payload` (base64 UTF-8 JSON), and `signature` (base64 Ed25519 signature). Sign `YAOC-UPDATE-V1\n` followed by the decoded payload, with an actual LF after V1. The payload has `formatVersion: 1`, `version`, `channel: "official"`, and exactly two assets with `name`, `size`, and lowercase hexadecimal `sha256`. Verification uses the exact signed bytes, without reserializing JSON. Neither manifests nor renderer commands can supply arbitrary executable paths, URLs, or shell commands.
