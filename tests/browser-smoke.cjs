@@ -209,6 +209,120 @@ async function openApp(browser, options = {}) {
   });
   try {
     for (const theme of ['dark', 'light']) {
+      const tokenPage = await openApp(browser, {
+        theme,
+        sessionRows: [
+          {
+            key: 'main',
+            agentId: 'main',
+            totalTokens: 42100,
+            contextTokens: 128000,
+            inputTokens: 40000,
+            outputTokens: 2100,
+          },
+          { key: 'other', agentId: 'main', totalTokens: 90000, contextTokens: 100000 },
+        ],
+      });
+      const meter = tokenPage.locator('.session-token-meter');
+      await meter.filter({ hasText: 'Tokens: 42.1K / 128K (33%)' }).waitFor();
+      assert.equal(await tokenPage.locator('.chat-session-header .session-token-meter').count(), 0);
+      assert.equal(await tokenPage.locator('.composer-toolbar .session-token-meter').count(), 1);
+      assert.equal(
+        await meter.evaluate((el) => el.nextElementSibling?.matches('.session-model-refresh')),
+        true
+      );
+      assert.ok((await meter.getAttribute('class')).includes('token-low'));
+      await meter.focus();
+      await meter.locator('.session-token-tooltip').waitFor({ state: 'visible' });
+      const tooltipBounds = await meter.locator('.session-token-tooltip').boundingBox();
+      const meterBounds = await meter.boundingBox();
+      assert.ok(tooltipBounds.y >= 0 && tooltipBounds.y + tooltipBounds.height <= meterBounds.y);
+      assert.match(await meter.getAttribute('aria-label'), /Input: 40,000\nOutput: 2,100/);
+      await tokenPage.locator('.session-item').filter({ hasText: 'other' }).click();
+      await meter.filter({ hasText: 'Tokens: 90K / 100K (90%)' }).waitFor();
+      assert.ok((await meter.getAttribute('class')).includes('token-high'));
+      const updateUsage = async (values) => {
+        await tokenPage.evaluate((values) => {
+          window.testSessionRows = [
+            { key: 'main', agentId: 'main' },
+            { key: 'other', agentId: 'main', ...values },
+          ];
+          window.testEmitGatewayEvent({
+            event: 'sessions.updated',
+            payload: {
+              sessions: window.testSessionRows,
+            },
+          });
+        }, values);
+      };
+      await updateUsage({ totalTokens: 60000, contextTokens: 100000 });
+      await meter.filter({ hasText: '(60%)' }).waitFor();
+      assert.ok((await meter.getAttribute('class')).includes('token-medium'));
+      await updateUsage({ totalTokens: 85000, contextTokens: 100000 });
+      await meter.filter({ hasText: '(85%)' }).waitFor();
+      assert.ok((await meter.getAttribute('class')).includes('token-medium'));
+      await updateUsage({ totalTokens: 120000, contextTokens: 100000 });
+      await meter.filter({ hasText: '(120%)' }).waitFor();
+      await updateUsage({ totalTokens: 0, contextTokens: 0 });
+      await meter.filter({ hasText: 'Tokens: 0' }).waitFor();
+      assert.equal(await meter.locator('span').nth(1).innerText(), 'Tokens: 0');
+      await updateUsage({ totalTokens: -1, contextTokens: 100000 });
+      await meter.filter({ hasText: 'Tokens unavailable' }).waitFor();
+      await updateUsage({ totalTokens: 42 });
+      await meter.filter({ hasText: 'Tokens: 42' }).waitFor();
+      assert.equal(await meter.locator('span').nth(1).innerText(), 'Tokens: 42');
+      await updateUsage({});
+      await meter.filter({ hasText: 'Tokens unavailable' }).waitFor();
+      await tokenPage.setViewportSize({ width: 900, height: 700 });
+      const narrowMeter = await meter.boundingBox();
+      const narrowRefresh = await tokenPage.locator('.session-model-refresh').boundingBox();
+      assert.ok(narrowMeter.x + narrowMeter.width <= narrowRefresh.x);
+      assert.ok(
+        Math.abs(
+          narrowMeter.y + narrowMeter.height / 2 - narrowRefresh.y - narrowRefresh.height / 2
+        ) < 1
+      );
+      assert.equal(
+        await tokenPage
+          .locator('.composer-toolbar')
+          .evaluate((el) => el.scrollWidth > el.clientWidth),
+        false
+      );
+      // Sidebars can constrain the chat pane independently of the native window width.
+      await updateUsage({ totalTokens: 42100, contextTokens: 128000 });
+      await meter.filter({ hasText: 'Tokens: 42.1K / 128K (33%)' }).waitFor();
+      for (const width of [500, 400, 300]) {
+        await tokenPage.locator('.chat-pane').evaluate((el, width) => {
+          el.style.flex = 'none';
+          el.style.width = `${width}px`;
+        }, width);
+        assert.equal(
+          await tokenPage
+            .locator('.session-model-row')
+            .evaluate((el) => el.scrollWidth > el.clientWidth),
+          false,
+          `Model controls overflow at ${width}px`
+        );
+        const header = await tokenPage.locator('.chat-session-header').boundingBox();
+        const actions = await tokenPage.locator('.chat-session-actions').boundingBox();
+        assert.ok(
+          actions.y + actions.height <= header.y + header.height,
+          `Header actions extend into the transcript at ${width}px`
+        );
+        const token = await meter.boundingBox();
+        const refresh = await tokenPage.locator('.session-model-refresh').boundingBox();
+        assert.ok(token.x + token.width <= refresh.x);
+        assert.ok(Math.abs(token.y + token.height / 2 - refresh.y - refresh.height / 2) < 1);
+        for (const name of ['Session model', 'Reasoning effort']) {
+          const selector = tokenPage.getByRole('button', { name, exact: true });
+          await selector.click();
+          await tokenPage.getByRole('dialog').waitFor();
+          await tokenPage.keyboard.press('Escape');
+        }
+      }
+      await tokenPage.close();
+    }
+    for (const theme of ['dark', 'light']) {
       const page = await openApp(browser, { theme });
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));

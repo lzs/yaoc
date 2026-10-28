@@ -59,6 +59,7 @@ import { hasMarkdownSyntax, MarkdownContent } from './markdown';
 import { ToolCallCard } from './ToolCallCard';
 import { RunCompletionTracker } from './runCompletion';
 import KeyboardShortcuts from './KeyboardShortcuts';
+import SessionTokenMeter from './SessionTokenMeter';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
 
@@ -3251,8 +3252,8 @@ export default function App() {
               </div>
             </div>
           )}
-          <div className="pane-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="pane-header chat-session-header">
+            <div className="chat-session-identity">
               <strong>Session:</strong>
               <code
                 style={{
@@ -3269,7 +3270,7 @@ export default function App() {
               </span>
             </div>
 
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="chat-session-actions">
               <button
                 className="btn"
                 onClick={() => loadChatHistory(selectedSessionKey)}
@@ -3991,6 +3992,19 @@ export default function App() {
                     <Plus size={17} strokeWidth={1.6} />
                   </button>
                   <SessionModelSwitcher
+                    leadingControl={
+                      <SessionTokenMeter
+                        session={
+                          connStatus.state === 'connected'
+                            ? sessions.find(
+                                (session) =>
+                                  session.key ===
+                                  toGatewaySessionKey(selectedAgentId, selectedSessionKey)
+                              )
+                            : undefined
+                        }
+                      />
+                    }
                     connectionId={`${activeProfileId}:${connStatus.endpoint || ''}`}
                     connected={connStatus.state === 'connected'}
                     agentId={selectedAgentId}

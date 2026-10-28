@@ -1,3 +1,88 @@
+.pane-header.chat-session-header {
+  height: auto;
+  min-height: 44px;
+  padding: 6px 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-session-identity,
+.chat-session-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-session-identity code {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.session-token-meter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.session-token-meter:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.session-token-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.token-low {
+  color: var(--text-token-low);
+}
+.token-medium {
+  color: var(--text-warning);
+}
+.token-high {
+  color: var(--text-danger);
+}
+
+.session-token-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: 240px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-main);
+  white-space: pre-line;
+  font-size: 12px;
+  font-weight: normal;
+  box-shadow: 0 6px 20px #0003;
+}
+
+.session-token-meter:hover .session-token-tooltip,
+.session-token-meter:focus .session-token-tooltip {
+  display: block;
+}
+
 :root {
   --bg-root: #090d16;
   --bg-panel: #0f1624;
@@ -18,6 +103,7 @@
   --text-accent: #fdba74;
   --text-danger: #fca5a5;
   --text-success: #6ee7b7;
+  --text-token-low: #82a99a;
   --text-warning: #fde68a;
   --text-info: #38bdf8;
   --bg-code: #060911;
@@ -52,6 +138,7 @@
   --text-accent: #9a3412;
   --text-danger: #b91c1c;
   --text-success: #047857;
+  --text-token-low: #567767;
   --text-warning: #854d0e;
   --text-info: #0369a1;
   --bg-code: #e9eef5;
@@ -1321,6 +1408,13 @@ textarea {
   min-width: 0;
 }
 
+.session-model-leading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .session-selector {
   display: inline-flex;
   align-items: center;
@@ -1846,6 +1940,13 @@ textarea {
   .session-model-control {
     order: 3;
     flex: 1 1 100%;
+  }
+  .session-model-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .session-model-leading {
+    grid-column: 1 / -1;
   }
   .session-model-select {
     max-width: none;

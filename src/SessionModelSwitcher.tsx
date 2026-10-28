@@ -15,6 +15,7 @@ import {
 import type { ThinkingMetadata } from './types';
 
 interface Props {
+  leadingControl?: React.ReactNode;
   connectionId: string;
   connected: boolean;
   agentId: string;
@@ -268,16 +269,19 @@ export default function SessionModelSwitcher(props: Props) {
   return (
     <div className="session-model-control">
       <div className="session-model-row">
-        <button
-          type="button"
-          className="composer-icon-btn session-model-refresh"
-          aria-label="Refresh available models"
-          title="Refresh available models"
-          disabled={!connected || loading || changing}
-          onClick={() => setReload((value) => value + 1)}
-        >
-          <RefreshCw size={13} className={loading || changing ? 'spin-icon' : ''} />
-        </button>
+        <div className="session-model-leading">
+          {props.leadingControl}
+          <button
+            type="button"
+            className="composer-icon-btn session-model-refresh"
+            aria-label="Refresh available models"
+            title="Refresh available models"
+            disabled={!connected || loading || changing}
+            onClick={() => setReload((value) => value + 1)}
+          >
+            <RefreshCw size={13} className={loading || changing ? 'spin-icon' : ''} />
+          </button>
+        </div>
         <button
           type="button"
           ref={modelButton}
