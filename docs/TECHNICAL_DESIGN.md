@@ -421,6 +421,10 @@ Named session keys are folded to lowercase before storage, comparison, and RPCs,
 
 Creating a session while connected also sends `sessions.patch` with the canonical key and the original display label. The Gateway therefore owns the label and capitalization, which YAOC reads back from `sessions.list` after restarting. Selecting an existing session does not overwrite its label. A rejected or failed label write leaves the local session usable and reports that the name was not saved. Offline creation remains local until the user saves its label with Rename while connected.
 
+### Default composer focus
+
+The composer receives focus on launch and restores focus when the document has no focused control, including after reconnecting or returning to the window. Explicit focus in other controls, open dialogs and menus, session naming, and transcript text selections takes precedence. Focus recovery preserves the caret and avoids scrolling. Drafting remains available while disconnected; sending and attachments still require a Gateway connection.
+
 ### Session token meter
 
 `SessionTokenMeter.tsx` displays the selected session's Gateway-reported `totalTokens` and positive `contextTokens` capacity in the bottom composer toolbar immediately to the left of the model refresh button, with compact counts and a rounded percentage. Usage is muted green below 60%, amber from 60% through 85%, and red above 85%. Hover or keyboard focus reveals an upward-opening tooltip with exact total, capacity, input, and output counts. Missing, negative, and non-finite counts are unavailable; zero total is valid, and absent/zero capacity suppresses the percentage. Disconnected sessions show unavailable usage. The meter follows existing session-list refreshes and session update events rather than estimating tokens from messages or polling separately. These figures are the latest Gateway snapshot, not a cost estimate or a prediction of truncation.

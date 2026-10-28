@@ -208,6 +208,44 @@ async function openApp(browser, options = {}) {
       : {}),
   });
   try {
+    {
+      const focusPage = await openApp(browser);
+      const composer = focusPage.getByRole('textbox', { name: 'Message Assistant', exact: true });
+      await composer.waitFor();
+      const expectComposerFocus = () =>
+        focusPage.waitForFunction(() => document.activeElement?.matches('.composer-input'));
+      await expectComposerFocus();
+      await focusPage.evaluate(() => window.openclawApi.disconnect());
+      await composer.fill('Offline draft');
+      await expectComposerFocus();
+      assert.equal(
+        await focusPage.getByRole('button', { name: 'Send message', exact: true }).isDisabled(),
+        true
+      );
+      await composer.evaluate((el) => el.blur());
+      await expectComposerFocus();
+      await focusPage.evaluate(() => window.openclawApi.connect());
+      await expectComposerFocus();
+      assert.equal(await composer.inputValue(), 'Offline draft');
+      const attachButton = focusPage.getByRole('button', {
+        name: 'Attach images or files',
+        exact: true,
+      });
+      await attachButton.focus();
+      await focusPage.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await focusPage.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      );
+      assert.equal(await attachButton.evaluate((el) => document.activeElement === el), true);
+      await composer.focus();
+      await focusPage.keyboard.press('Control+p');
+      await focusPage.getByRole('dialog').waitFor();
+      assert.equal(await composer.evaluate((el) => document.activeElement === el), false);
+      await focusPage.keyboard.press('Escape');
+      await expectComposerFocus();
+      await focusPage.close();
+    }
+
     for (const theme of ['dark', 'light']) {
       const tokenPage = await openApp(browser, {
         theme,

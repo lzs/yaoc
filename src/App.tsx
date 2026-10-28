@@ -979,6 +979,50 @@ export default function App() {
     return () => window.removeEventListener('focus', onFocus);
   }, [approvals.length]);
 
+  // Keep the composer ready when focus is otherwise unclaimed. Deliberate focus
+  // in controls, popups, editors, and selected transcript text takes precedence.
+  useEffect(() => {
+    if (
+      showProfileModal ||
+      showQuickSwitcher ||
+      showQuitConfirmModal ||
+      lightboxImage ||
+      showNewSessionInput ||
+      renamingSessionKey ||
+      sessionMenu
+    )
+      return;
+
+    let frame = 0;
+    const restoreDefaultFocus = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!document.hasFocus() || document.getSelection()?.isCollapsed === false) return;
+        const active = document.activeElement;
+        if (active && active !== document.body && active !== document.documentElement) return;
+        if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+        composerInputRef.current?.focus({ preventScroll: true });
+      });
+    };
+    restoreDefaultFocus();
+    window.addEventListener('focus', restoreDefaultFocus);
+    document.addEventListener('focusout', restoreDefaultFocus);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('focus', restoreDefaultFocus);
+      document.removeEventListener('focusout', restoreDefaultFocus);
+    };
+  }, [
+    showProfileModal,
+    showQuickSwitcher,
+    showQuitConfirmModal,
+    lightboxImage,
+    showNewSessionInput,
+    renamingSessionKey,
+    sessionMenu,
+    connStatus.state,
+  ]);
+
   function copyText(text: string, id: string) {
     navigator.clipboard.writeText(text);
     setCopiedCmd(id);
@@ -3921,14 +3965,14 @@ export default function App() {
                   ref={composerInputRef}
                   className="composer-input"
                   aria-label="Message Assistant"
+                  autoFocus
                   rows={2}
                   placeholder={
                     connStatus.state === 'connected'
                       ? 'Message Assistant (type / for commands)'
-                      : 'Connect to a Gateway to message Assistant'
+                      : 'Draft a message (connect to a Gateway to send)'
                   }
                   value={composerText}
-                  disabled={connStatus.state !== 'connected'}
                   onChange={(e) => {
                     const val = e.target.value;
                     setComposerText(val);
