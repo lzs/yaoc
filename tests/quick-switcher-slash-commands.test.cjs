@@ -72,10 +72,7 @@ test('App keyboard handler binds Ctrl+P and Ctrl+Shift+P strictly without Ctrl+K
     appCode.includes("setQuickSwitcherMode('command')"),
     'Shift+Ctrl+P must set command mode'
   );
-  assert.ok(
-    appCode.includes("setQuickSwitcherMode('search')"),
-    'Ctrl+P must set search mode'
-  );
+  assert.ok(appCode.includes("setQuickSwitcherMode('search')"), 'Ctrl+P must set search mode');
 
   // Strictly verify NO Ctrl+K binding exists
   const hasCtrlK = /(e\.key\s*===\s*['"]k['"]|KeyK)/i.test(appCode);
@@ -144,15 +141,24 @@ test('Slash menu filters commands and templates correctly', () => {
     (i) =>
       i.trigger.toLowerCase().includes('rev') ||
       i.label.toLowerCase().includes('rev') ||
-      i.description.toLowerCase().split(/\s+/).some((w) => w.startsWith('rev'))
+      i.description
+        .toLowerCase()
+        .split(/\s+/)
+        .some((w) => w.startsWith('rev'))
   );
-  assert.ok(matchRev.some((i) => i.trigger === 'review'), 'Filter rev should match review');
+  assert.ok(
+    matchRev.some((i) => i.trigger === 'review'),
+    'Filter rev should match review'
+  );
   assert.ok(!matchRev.some((i) => i.trigger === 'compact'), 'Filter rev should not match compact');
 });
 
 test('QuickSwitcher properly partitions search items and commands', () => {
   const qsCode = fs.readFileSync('src/QuickSwitcher.tsx', 'utf8');
-  assert.ok(qsCode.includes("query.startsWith('>')"), 'QuickSwitcher detects command mode prefix >');
+  assert.ok(
+    qsCode.includes("query.startsWith('>')"),
+    'QuickSwitcher detects command mode prefix >'
+  );
   assert.ok(qsCode.includes('cmd-new-session'), 'Includes New Session command');
   assert.ok(qsCode.includes('cmd-settings'), 'Includes Settings command');
   assert.ok(qsCode.includes('cmd-workspace-toggle'), 'Includes Workspace Toggle command');

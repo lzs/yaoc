@@ -44,21 +44,24 @@ export const DEFAULT_PROMPT_TEMPLATES: PromptTemplate[] = [
     id: 'builtin-fix',
     trigger: 'fix',
     label: 'Debug & Fix',
-    template: 'Debug and resolve the following issue. Explain the root cause and provide the solution:\n\n',
+    template:
+      'Debug and resolve the following issue. Explain the root cause and provide the solution:\n\n',
     isBuiltIn: true,
   },
   {
     id: 'builtin-explain',
     trigger: 'explain',
     label: 'Explain Code',
-    template: 'Explain how the following code works step-by-step and its architectural concepts:\n\n',
+    template:
+      'Explain how the following code works step-by-step and its architectural concepts:\n\n',
     isBuiltIn: true,
   },
   {
     id: 'builtin-refactor',
     trigger: 'refactor',
     label: 'Refactor Code',
-    template: 'Refactor the following code for better readability, maintainability, and idiomatic style:\n\n',
+    template:
+      'Refactor the following code for better readability, maintainability, and idiomatic style:\n\n',
     isBuiltIn: true,
   },
   {
@@ -180,7 +183,10 @@ export default function SlashCommands({
       (item) =>
         item.trigger.toLowerCase().includes(cleanFilter) ||
         item.label.toLowerCase().includes(cleanFilter) ||
-        item.description.toLowerCase().split(/\s+/).some((w) => w.startsWith(cleanFilter))
+        item.description
+          .toLowerCase()
+          .split(/\s+/)
+          .some((w) => w.startsWith(cleanFilter))
     );
   }, [allItems, cleanFilter]);
 

@@ -2548,7 +2548,9 @@ textarea {
   border-radius: 8px;
   cursor: pointer;
   border-left: 3px solid transparent;
-  transition: background 80ms, border-color 80ms;
+  transition:
+    background 80ms,
+    border-color 80ms;
 }
 
 .quick-switcher-item:hover,
@@ -2865,4 +2867,3 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-

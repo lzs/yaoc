@@ -171,20 +171,20 @@ yaoc/
 
 ### 3.3 Tauri IPC Commands & Events
 
-| Tauri Command        | Arguments                            | Return Type                               | Description                                                                                                                                                                      |
-| :------------------- | :----------------------------------- | :---------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_system_info`    | _(none)_                             | `SystemInfo`                              | Returns `platform: "win32"`, `arch`, `runtime: "tauri-v2"`, and `deviceIdentity` (`deviceId`, `publicKey`).                                                                      |
-| `load_profiles`      | _(none)_                             | `{ profiles, activeProfileId, uiState? }` | Loads profiles and UI state from `%APPDATA%\yaoc\gateway-profiles.json` (or returns built-in defaults).                                                                 |
-| `save_profiles`      | `profiles, activeProfileId, uiState` | `{ ok: boolean }`                         | Writes profiles and UI state to `%APPDATA%\yaoc\gateway-profiles.json`.                                                                                                 |
-| `gateway_connect`    | `profile: GatewayProfile`            | `Value`                                   | Connects to a live Gateway or starts `mock://demo` mode.                                                                                                                         |
-| `gateway_disconnect` | _(none)_                             | `{ ok: boolean }`                         | Closes the active WebSocket connection and cancels pending requests.                                                                                                             |
-| `gateway_request`    | `method, params, timeoutMs`          | `Value`                                   | Sends an RPC request over the active Gateway connection (or handles it in `handle_mock_rpc`).                                                                                    |
-| `set_global_hotkey`  | `hotkey: String`                     | `{ ok: boolean, hotkey: string }`         | Dynamically unregisters/registers the Windows global shortcut (`RegisterHotKey` on the hotkey thread via `PostThreadMessageW`) and updates the system tray menu label & tooltip. |
-| `set_taskbar_progress`| `status: String, progress?: u32`    | `{ ok: boolean }`                         | Updates the Windows taskbar progress state (`none`, `indeterminate`, `paused`, `error`, `normal`) and optional completion percentage (0–100) via `tauri::window::ProgressBarState`. |
-| `request_attention`  | `level?: String`                     | `{ ok: boolean }`                         | Requests or clears user attention on the main taskbar entry (`critical` flashes until focused, `informational` flashes briefly, `none` clears) via `window.request_user_attention`. |
-| `show_notification`  | `title: String, body: String, sound?: bool` | `{ ok: boolean }`                  | Emits a native Windows toast notification via `tauri-plugin-notification`.                                                                                                       |
-| `play_notification_sound` | `sound_type?: String`          | `{ ok: boolean }`                         | Plays a native Win32 system chime via `MessageBeep` (`info` $\rightarrow$ `0x40`, `warning` $\rightarrow$ `0x30`, `error` $\rightarrow$ `0x10`) without external audio dependencies. |
-| `quit_app`           | _(none)_                             | `()`                                      | Exits the Tauri process immediately (`app.exit(0)`), closing the system tray icon and background connection.                                                                     |
+| Tauri Command             | Arguments                                   | Return Type                               | Description                                                                                                                                                                          |
+| :------------------------ | :------------------------------------------ | :---------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_system_info`         | _(none)_                                    | `SystemInfo`                              | Returns `platform: "win32"`, `arch`, `runtime: "tauri-v2"`, and `deviceIdentity` (`deviceId`, `publicKey`).                                                                          |
+| `load_profiles`           | _(none)_                                    | `{ profiles, activeProfileId, uiState? }` | Loads profiles and UI state from `%APPDATA%\yaoc\gateway-profiles.json` (or returns built-in defaults).                                                                              |
+| `save_profiles`           | `profiles, activeProfileId, uiState`        | `{ ok: boolean }`                         | Writes profiles and UI state to `%APPDATA%\yaoc\gateway-profiles.json`.                                                                                                              |
+| `gateway_connect`         | `profile: GatewayProfile`                   | `Value`                                   | Connects to a live Gateway or starts `mock://demo` mode.                                                                                                                             |
+| `gateway_disconnect`      | _(none)_                                    | `{ ok: boolean }`                         | Closes the active WebSocket connection and cancels pending requests.                                                                                                                 |
+| `gateway_request`         | `method, params, timeoutMs`                 | `Value`                                   | Sends an RPC request over the active Gateway connection (or handles it in `handle_mock_rpc`).                                                                                        |
+| `set_global_hotkey`       | `hotkey: String`                            | `{ ok: boolean, hotkey: string }`         | Dynamically unregisters/registers the Windows global shortcut (`RegisterHotKey` on the hotkey thread via `PostThreadMessageW`) and updates the system tray menu label & tooltip.     |
+| `set_taskbar_progress`    | `status: String, progress?: u32`            | `{ ok: boolean }`                         | Updates the Windows taskbar progress state (`none`, `indeterminate`, `paused`, `error`, `normal`) and optional completion percentage (0–100) via `tauri::window::ProgressBarState`.  |
+| `request_attention`       | `level?: String`                            | `{ ok: boolean }`                         | Requests or clears user attention on the main taskbar entry (`critical` flashes until focused, `informational` flashes briefly, `none` clears) via `window.request_user_attention`.  |
+| `show_notification`       | `title: String, body: String, sound?: bool` | `{ ok: boolean }`                         | Emits a native Windows toast notification via `tauri-plugin-notification`.                                                                                                           |
+| `play_notification_sound` | `sound_type?: String`                       | `{ ok: boolean }`                         | Plays a native Win32 system chime via `MessageBeep` (`info` $\rightarrow$ `0x40`, `warning` $\rightarrow$ `0x30`, `error` $\rightarrow$ `0x10`) without external audio dependencies. |
+| `quit_app`                | _(none)_                                    | `()`                                      | Exits the Tauri process immediately (`app.exit(0)`), closing the system tray icon and background connection.                                                                         |
 
 ### 3.4 System Tray, Close-to-Tray & Customizable Global Shortcut (Default `Alt+Shift+3`)
 
@@ -198,7 +198,7 @@ yaoc/
   - `Ctrl+Shift+P`: Opens the Command Palette in **Command Actions** mode (prefixed with `>`).
   - Supports dynamic mode switching: typing `>` switches instantly to command actions; backspacing `>` returns to search mode.
   - Actions include `New Session`, `Open Settings`, `Toggle Workspace Drawer`, `Switch Theme`, `Reset Session`, `Toggle Notifications`, `Toggle Sound`, `Test Notification & Sound`, `Connect / Disconnect Gateway`, `Quit Application`, and agent switching.
-  - *Explicit Keyboard Policy:* Binds strictly `Ctrl+P` and `Ctrl+Shift+P`; no `Ctrl+K`. Prevents WebView2 default print dialog.
+  - _Explicit Keyboard Policy:_ Binds strictly `Ctrl+P` and `Ctrl+Shift+P`; no `Ctrl+K`. Prevents WebView2 default print dialog.
 - **Slash Commands & Prompt Template Autocomplete (`/` in Composer):**
   - Typing `/` in the message composer opens an autocomplete popup directly anchored above the input bar.
   - Autocompletes built-in Gateway commands (`/reset`, `/compact`, `/status`, `/stop`, `/help`) and prompt templates (`/review`, `/test`, `/fix`, `/explain`, `/refactor`, `/doc`).
@@ -364,7 +364,9 @@ Upstream `webview2-com-sys` attempts to link against MSVC-compiled `WebView2Load
 - **Official Release Builds:** `npm run release` (or `npm run release:x64` / `npm run release:arm64`)
 
 #### Release Profile Optimization (`src-tauri/Cargo.toml`)
+
 The release profile is tuned for standalone portability and minimal binary footprint:
+
 ```toml
 [profile.release]
 strip = true
@@ -373,6 +375,7 @@ lto = "thin"         # Cross-crate Link-Time Optimization
 codegen-units = 1    # Maximize whole-crate optimization and dead-code elimination
 panic = "abort"      # Strip C++ unwind / landing pad tables
 ```
+
 This achieves a **~33% binary size reduction**, bringing the standalone portable executable to **~4.58 MB (x64)** and **~4.22 MB (ARM64)** while retaining the embedded `WebView2Loader.dll` and all native Windows shell/notification features.
 
 ### Session-scoped composer and run state

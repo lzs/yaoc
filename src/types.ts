@@ -177,7 +177,10 @@ declare global {
       setGlobalHotkey?: (hotkey: string) => Promise<{ ok: boolean; hotkey: string }>;
       quitApp?: () => Promise<void>;
       openExternalUrl?: (url: string) => Promise<{ ok: boolean }>;
-      setTaskbarProgress?: (status?: 'none' | 'normal' | 'indeterminate' | 'paused' | 'error', progress?: number) => Promise<void>;
+      setTaskbarProgress?: (
+        status?: 'none' | 'normal' | 'indeterminate' | 'paused' | 'error',
+        progress?: number
+      ) => Promise<void>;
       showNotification?: (title: string, body: string, sound?: boolean) => Promise<void>;
       playNotificationSound?: (soundType?: 'info' | 'warning' | 'error') => Promise<void>;
       requestAttention?: (level?: 'informational' | 'critical' | 'none') => Promise<void>;

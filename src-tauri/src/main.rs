@@ -845,12 +845,7 @@ async fn gateway_connect(
         state_clone
             .disconnect_connection(
                 Some(epoch),
-                Some((
-                    &app_clone,
-                    &profile_id_clone,
-                    &ws_url_clone,
-                    &close_reason,
-                )),
+                Some((&app_clone, &profile_id_clone, &ws_url_clone, &close_reason)),
             )
             .await;
     }));
@@ -1368,7 +1363,9 @@ fn open_external_url(url: String) -> Result<Value, String> {
             )
         };
         if result <= 32 {
-            return Err(format!("Failed to open URL (ShellExecute error code {result})"));
+            return Err(format!(
+                "Failed to open URL (ShellExecute error code {result})"
+            ));
         }
     }
     #[cfg(not(target_os = "windows"))]
@@ -1439,9 +1436,7 @@ fn play_notification_sound(sound_type: Option<String>) {
             _ => 0x00000040,
         };
         let res = unsafe { MessageBeep(beep_type) };
-        log_boot(&format!(
-            "MessageBeep(0x{beep_type:08x}) returned {res}"
-        ));
+        log_boot(&format!("MessageBeep(0x{beep_type:08x}) returned {res}"));
     }
 }
 
@@ -1486,7 +1481,9 @@ fn setup_windows_toast_support() {
         .collect();
 
     let hr = unsafe { SetCurrentProcessExplicitAppUserModelID(aumid_wide.as_ptr()) };
-    log_boot(&format!("SetCurrentProcessExplicitAppUserModelID: 0x{hr:08x}"));
+    log_boot(&format!(
+        "SetCurrentProcessExplicitAppUserModelID: 0x{hr:08x}"
+    ));
 
     std::thread::spawn(|| {
         if let Ok(exe_path) = std::env::current_exe() {
@@ -1571,12 +1568,10 @@ fn request_attention(window: tauri::WebviewWindow, level: Option<String>) -> Res
         Some("none") | Some("clear") => None,
         _ => Some(tauri::UserAttentionType::Informational),
     };
-    window
-        .request_user_attention(attention_type)
-        .map_err(|e| {
-            log_boot(&format!("request_user_attention error: {e}"));
-            e.to_string()
-        })
+    window.request_user_attention(attention_type).map_err(|e| {
+        log_boot(&format!("request_user_attention error: {e}"));
+        e.to_string()
+    })
 }
 
 // Re-read visibility, minimization, and focus on the main thread after window operations.
@@ -2400,9 +2395,18 @@ mod tests {
         ]);
         let encrypted = encrypt_profiles_array(profiles).unwrap();
         let p0 = &encrypted.as_array().unwrap()[0];
-        assert!(p0["token"].as_str().unwrap().starts_with(storage::DPAPI_PREFIX));
-        assert!(p0["password"].as_str().unwrap().starts_with(storage::DPAPI_PREFIX));
-        assert!(p0["deviceToken"].as_str().unwrap().starts_with(storage::DPAPI_PREFIX));
+        assert!(p0["token"]
+            .as_str()
+            .unwrap()
+            .starts_with(storage::DPAPI_PREFIX));
+        assert!(p0["password"]
+            .as_str()
+            .unwrap()
+            .starts_with(storage::DPAPI_PREFIX));
+        assert!(p0["deviceToken"]
+            .as_str()
+            .unwrap()
+            .starts_with(storage::DPAPI_PREFIX));
 
         let (decrypted_doc, needs_migration) =
             decrypt_profiles_value(json!({ "profiles": encrypted })).unwrap();
@@ -2451,28 +2455,57 @@ mod tests {
             }
         };
 
-        assert!(matches!(parse_status(Some("none")).unwrap(), Some(ProgressBarStatus::None)));
-        assert!(matches!(parse_status(Some("normal")).unwrap(), Some(ProgressBarStatus::Normal)));
-        assert!(matches!(parse_status(Some("indeterminate")).unwrap(), Some(ProgressBarStatus::Indeterminate)));
-        assert!(matches!(parse_status(Some("paused")).unwrap(), Some(ProgressBarStatus::Paused)));
-        assert!(matches!(parse_status(Some("error")).unwrap(), Some(ProgressBarStatus::Error)));
+        assert!(matches!(
+            parse_status(Some("none")).unwrap(),
+            Some(ProgressBarStatus::None)
+        ));
+        assert!(matches!(
+            parse_status(Some("normal")).unwrap(),
+            Some(ProgressBarStatus::Normal)
+        ));
+        assert!(matches!(
+            parse_status(Some("indeterminate")).unwrap(),
+            Some(ProgressBarStatus::Indeterminate)
+        ));
+        assert!(matches!(
+            parse_status(Some("paused")).unwrap(),
+            Some(ProgressBarStatus::Paused)
+        ));
+        assert!(matches!(
+            parse_status(Some("error")).unwrap(),
+            Some(ProgressBarStatus::Error)
+        ));
         assert!(matches!(parse_status(None).unwrap(), None));
         assert!(parse_status(Some("invalid")).is_err());
 
         let parse_attention = |level: Option<&str>| -> Option<tauri::UserAttentionType> {
             match level {
                 Some("critical") => Some(tauri::UserAttentionType::Critical),
-                Some("informational") | Some("info") => Some(tauri::UserAttentionType::Informational),
+                Some("informational") | Some("info") => {
+                    Some(tauri::UserAttentionType::Informational)
+                }
                 Some("none") | Some("clear") => None,
                 _ => Some(tauri::UserAttentionType::Informational),
             }
         };
 
-        assert_eq!(parse_attention(Some("critical")), Some(tauri::UserAttentionType::Critical));
-        assert_eq!(parse_attention(Some("informational")), Some(tauri::UserAttentionType::Informational));
-        assert_eq!(parse_attention(Some("info")), Some(tauri::UserAttentionType::Informational));
+        assert_eq!(
+            parse_attention(Some("critical")),
+            Some(tauri::UserAttentionType::Critical)
+        );
+        assert_eq!(
+            parse_attention(Some("informational")),
+            Some(tauri::UserAttentionType::Informational)
+        );
+        assert_eq!(
+            parse_attention(Some("info")),
+            Some(tauri::UserAttentionType::Informational)
+        );
         assert_eq!(parse_attention(Some("none")), None);
         assert_eq!(parse_attention(Some("clear")), None);
-        assert_eq!(parse_attention(None), Some(tauri::UserAttentionType::Informational));
+        assert_eq!(
+            parse_attention(None),
+            Some(tauri::UserAttentionType::Informational)
+        );
     }
 }

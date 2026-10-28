@@ -205,7 +205,9 @@ export default function QuickSwitcher({
       {
         id: 'cmd-toggle-notifications',
         type: 'command',
-        title: notificationsEnabled ? 'Disable Desktop Notifications' : 'Enable Desktop Notifications',
+        title: notificationsEnabled
+          ? 'Disable Desktop Notifications'
+          : 'Enable Desktop Notifications',
         subtitle: 'Toggle Windows Action Center toast alerts',
         icon: <Bell size={16} />,
         onSelect: () => {
@@ -408,7 +410,9 @@ export default function QuickSwitcher({
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex((prev) => (filteredItems.length > 0 ? (prev + 1) % filteredItems.length : 0));
+      setSelectedIndex((prev) =>
+        filteredItems.length > 0 ? (prev + 1) % filteredItems.length : 0
+      );
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex((prev) =>
@@ -433,7 +437,12 @@ export default function QuickSwitcher({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="quick-switcher-card" role="dialog" aria-modal="true" aria-label="Quick Switcher">
+      <div
+        className="quick-switcher-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Quick Switcher"
+      >
         <div className="quick-switcher-search-bar">
           <div className="quick-switcher-icon">
             {isCommandMode ? <Command size={18} /> : <Search size={18} />}

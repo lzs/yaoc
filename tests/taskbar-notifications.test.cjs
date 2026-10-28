@@ -106,10 +106,19 @@ test('taskbar state logic: paused on approvals, indeterminate on streaming, none
 
 test('UI session state types and settings persistence include notification flags', () => {
   const typesContent = fs.readFileSync('src/types.ts', 'utf8');
-  assert.ok(typesContent.includes('notificationsEnabled?: boolean'), 'UiSessionState should have notificationsEnabled');
-  assert.ok(typesContent.includes('notificationSound?: boolean'), 'UiSessionState should have notificationSound');
+  assert.ok(
+    typesContent.includes('notificationsEnabled?: boolean'),
+    'UiSessionState should have notificationsEnabled'
+  );
+  assert.ok(
+    typesContent.includes('notificationSound?: boolean'),
+    'UiSessionState should have notificationSound'
+  );
 
   const appContent = fs.readFileSync('src/App.tsx', 'utf8');
-  assert.ok(appContent.includes('notificationsEnabled:'), 'App.tsx should persist notificationsEnabled');
+  assert.ok(
+    appContent.includes('notificationsEnabled:'),
+    'App.tsx should persist notificationsEnabled'
+  );
   assert.ok(appContent.includes('notificationSound:'), 'App.tsx should persist notificationSound');
 });

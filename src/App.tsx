@@ -515,7 +515,9 @@ export default function App() {
   );
   const [connStatus, setConnStatus] = useState<ConnectionStatus>({ state: 'disconnected' });
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'gateway' | 'shortcuts' | 'about'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'gateway' | 'shortcuts' | 'about'>(
+    'general'
+  );
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const settingsDialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -2480,7 +2482,8 @@ export default function App() {
           e.preventDefault();
           const offset = e.key === 'PageDown' ? 1 : -1;
           const index = SETTINGS_TABS.indexOf(settingsTab);
-          const next = SETTINGS_TABS[(index + offset + SETTINGS_TABS.length) % SETTINGS_TABS.length];
+          const next =
+            SETTINGS_TABS[(index + offset + SETTINGS_TABS.length) % SETTINGS_TABS.length];
           setSettingsTab(next);
           settingsDialogRef.current?.querySelector<HTMLElement>(`#settings-tab-${next}`)?.focus();
           return;
@@ -2505,11 +2508,19 @@ export default function App() {
       }
       if (
         (e.ctrlKey || e.metaKey) &&
-        !e.altKey && !e.shiftKey &&
+        !e.altKey &&
+        !e.shiftKey &&
         (e.key === '/' || e.code === 'Slash')
       ) {
-        if (e.defaultPrevented || e.isComposing || isRecordingHotkey ||
-            showQuitConfirmModal || lightboxImage || renamingSessionKey) return;
+        if (
+          e.defaultPrevented ||
+          e.isComposing ||
+          isRecordingHotkey ||
+          showQuitConfirmModal ||
+          lightboxImage ||
+          renamingSessionKey
+        )
+          return;
         e.preventDefault();
         openKeyboardShortcuts();
         return;
@@ -3948,7 +3959,13 @@ export default function App() {
                     }
                   }}
                   onKeyDown={(e) => {
-                    if (slashMenuOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab' || e.key === 'Escape')) {
+                    if (
+                      slashMenuOpen &&
+                      (e.key === 'ArrowDown' ||
+                        e.key === 'ArrowUp' ||
+                        e.key === 'Tab' ||
+                        e.key === 'Escape')
+                    ) {
                       // Handled by SlashCommands
                       return;
                     }
@@ -3962,78 +3979,84 @@ export default function App() {
                     }
                   }}
                 />
-              <div className="composer-toolbar">
-                <button
-                  type="button"
-                  className="composer-icon-btn composer-attach-btn"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={connStatus.state !== 'connected'}
-                  aria-label="Attach images or files"
-                  title="Attach images or files (Ctrl+V or drag and drop)"
-                >
-                  <Plus size={17} strokeWidth={1.6} />
-                </button>
-                <SessionModelSwitcher
-                  connectionId={`${activeProfileId}:${connStatus.endpoint || ''}`}
-                  connected={connStatus.state === 'connected'}
-                  agentId={selectedAgentId}
-                  sessionKey={selectedSessionKey}
-                  model={sessions.find((session) => session.key === selectedSessionKey)?.model}
-                  modelProvider={
-                    sessions.find((session) => session.key === selectedSessionKey)?.modelProvider
-                  }
-                  thinkingLevel={
-                    sessions.find((session) => session.key === selectedSessionKey)?.thinkingLevel
-                  }
-                  thinkingMetadata={sessions.find((session) => session.key === selectedSessionKey)}
-                  streaming={isStreaming}
-                  onBusyChange={setIsChangingModel}
-                  onThinkingChanged={(thinkingLevel) =>
-                    setSessions((previous) =>
-                      previous.map((session) =>
-                        session.key === selectedSessionKey ? { ...session, thinkingLevel } : session
-                      )
-                    )
-                  }
-                  onModelChanged={(selection) =>
-                    setSessions((previous) =>
-                      previous.map((session) =>
-                        session.key === selectedSessionKey ? { ...session, ...selection } : session
-                      )
-                    )
-                  }
-                />
-                {isStreaming ? (
+                <div className="composer-toolbar">
                   <button
                     type="button"
-                    className="composer-icon-btn composer-send-btn composer-stop-btn"
-                    aria-label="Stop response"
-                    title="Stop response"
-                    onClick={handleAbortRun}
+                    className="composer-icon-btn composer-attach-btn"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={connStatus.state !== 'connected'}
+                    aria-label="Attach images or files"
+                    title="Attach images or files (Ctrl+V or drag and drop)"
                   >
-                    <Square size={13} fill="currentColor" />
+                    <Plus size={17} strokeWidth={1.6} />
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="composer-icon-btn composer-send-btn"
-                    aria-label="Send message"
-                    title="Send message (Enter)"
-                    onClick={() => handleSendMessage()}
-                    disabled={
-                      connStatus.state !== 'connected' ||
-                      isChangingModel ||
-                      (composerText.trim().length === 0 && pendingAttachments.length === 0)
+                  <SessionModelSwitcher
+                    connectionId={`${activeProfileId}:${connStatus.endpoint || ''}`}
+                    connected={connStatus.state === 'connected'}
+                    agentId={selectedAgentId}
+                    sessionKey={selectedSessionKey}
+                    model={sessions.find((session) => session.key === selectedSessionKey)?.model}
+                    modelProvider={
+                      sessions.find((session) => session.key === selectedSessionKey)?.modelProvider
                     }
-                  >
-                    <ArrowUp size={18} />
-                  </button>
-                )}
+                    thinkingLevel={
+                      sessions.find((session) => session.key === selectedSessionKey)?.thinkingLevel
+                    }
+                    thinkingMetadata={sessions.find(
+                      (session) => session.key === selectedSessionKey
+                    )}
+                    streaming={isStreaming}
+                    onBusyChange={setIsChangingModel}
+                    onThinkingChanged={(thinkingLevel) =>
+                      setSessions((previous) =>
+                        previous.map((session) =>
+                          session.key === selectedSessionKey
+                            ? { ...session, thinkingLevel }
+                            : session
+                        )
+                      )
+                    }
+                    onModelChanged={(selection) =>
+                      setSessions((previous) =>
+                        previous.map((session) =>
+                          session.key === selectedSessionKey
+                            ? { ...session, ...selection }
+                            : session
+                        )
+                      )
+                    }
+                  />
+                  {isStreaming ? (
+                    <button
+                      type="button"
+                      className="composer-icon-btn composer-send-btn composer-stop-btn"
+                      aria-label="Stop response"
+                      title="Stop response"
+                      onClick={handleAbortRun}
+                    >
+                      <Square size={13} fill="currentColor" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="composer-icon-btn composer-send-btn"
+                      aria-label="Send message"
+                      title="Send message (Enter)"
+                      onClick={() => handleSendMessage()}
+                      disabled={
+                        connStatus.state !== 'connected' ||
+                        isChangingModel ||
+                        (composerText.trim().length === 0 && pendingAttachments.length === 0)
+                      }
+                    >
+                      <ArrowUp size={18} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </main>
+        </main>
 
         {/* Right Pane: Full Workspace Directory Browser & File Editor */}
         {showWorkspacePane && (
@@ -4413,7 +4436,9 @@ export default function App() {
                       ? 'General'
                       : tab === 'gateway'
                         ? 'Gateway Profiles'
-                        : tab === 'shortcuts' ? 'Shortcuts' : 'About'}
+                        : tab === 'shortcuts'
+                          ? 'Shortcuts'
+                          : 'About'}
                   </button>
                 ))}
               </div>
@@ -4534,7 +4559,14 @@ export default function App() {
 
                   <div className="form-row">
                     <label>Windows Desktop Notifications &amp; Sound</label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '2px' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        marginTop: '2px',
+                      }}
+                    >
                       <label
                         style={{
                           display: 'flex',
@@ -4576,7 +4608,9 @@ export default function App() {
                           style={{
                             fontSize: '11.5px',
                             padding: '4px 10px',
-                            borderColor: testNotifySent ? 'var(--color-primary, #10b981)' : undefined,
+                            borderColor: testNotifySent
+                              ? 'var(--color-primary, #10b981)'
+                              : undefined,
                             color: testNotifySent ? 'var(--color-primary, #10b981)' : undefined,
                             fontWeight: testNotifySent ? 600 : undefined,
                           }}
@@ -4598,16 +4632,17 @@ export default function App() {
                       </div>
                     </div>
                     <p className="settings-help">
-                      Notifies when agent generations complete or when tool execution approvals are requested while YAOC is unfocused or minimized to tray.
+                      Notifies when agent generations complete or when tool execution approvals are
+                      requested while YAOC is unfocused or minimized to tray.
                     </p>
                   </div>
 
                   <div className="form-row">
                     <label>Prompt Templates &amp; Slash Commands</label>
                     <p className="settings-help" style={{ marginBottom: '8px' }}>
-                      Type <code>/</code> in the message composer to trigger built-in Gateway commands
-                      (<code>/reset</code>, <code>/compact</code>, <code>/status</code>, <code>/stop</code>, <code>/help</code>)
-                      or quickly insert prompt templates.
+                      Type <code>/</code> in the message composer to trigger built-in Gateway
+                      commands (<code>/reset</code>, <code>/compact</code>, <code>/status</code>,{' '}
+                      <code>/stop</code>, <code>/help</code>) or quickly insert prompt templates.
                     </p>
 
                     <div style={{ maxHeight: '180px', overflowY: 'auto', marginBottom: '10px' }}>
@@ -4684,9 +4719,18 @@ export default function App() {
                       }}
                     >
                       <div style={{ fontSize: '12px', fontWeight: 600 }}>Add Custom Template</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '8px' }}>
+                      <div
+                        style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '8px' }}
+                      >
                         <div>
-                          <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>
+                          <label
+                            style={{
+                              fontSize: '11px',
+                              color: 'var(--text-muted)',
+                              display: 'block',
+                              marginBottom: '2px',
+                            }}
+                          >
                             Trigger keyword
                           </label>
                           <input
@@ -4698,7 +4742,14 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>
+                          <label
+                            style={{
+                              fontSize: '11px',
+                              color: 'var(--text-muted)',
+                              display: 'block',
+                              marginBottom: '2px',
+                            }}
+                          >
                             Display label
                           </label>
                           <input
@@ -4711,7 +4762,14 @@ export default function App() {
                         </div>
                       </div>
                       <div>
-                        <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '2px' }}>
+                        <label
+                          style={{
+                            fontSize: '11px',
+                            color: 'var(--text-muted)',
+                            display: 'block',
+                            marginBottom: '2px',
+                          }}
+                        >
                           Template prompt text
                         </label>
                         <textarea
@@ -4736,7 +4794,6 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-
                 </div>
               )}
 
