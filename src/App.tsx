@@ -60,6 +60,7 @@ import { RunCompletionTracker } from './runCompletion';
 import KeyboardShortcuts from './KeyboardShortcuts';
 import SessionTokenMeter from './SessionTokenMeter';
 import ChatActionButton from './ChatActionButton';
+import TitleBar from './TitleBar';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
 
@@ -3017,9 +3018,16 @@ export default function App() {
       }}
     >
       {/* Top Navigation & Connection Bar */}
-      <header className="topbar">
+      <TitleBar platform={sysInfo?.platform}>
         <div className="brand">
-          <img src={YAOC_ICON_URL} width={24} height={24} alt="" aria-hidden="true" />
+          <img
+            src={YAOC_ICON_URL}
+            width={24}
+            height={24}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+          />
           <span>YAOC</span>
         </div>
 
@@ -3027,7 +3035,6 @@ export default function App() {
           <select
             className="select-field"
             aria-label="Active Gateway profile"
-            style={{ width: '260px' }}
             value={activeProfileId}
             onChange={(e) => {
               const nextId = e.target.value;
@@ -3088,7 +3095,7 @@ export default function App() {
             <span style={{ textTransform: 'capitalize' }}>{connStatus.state}</span>
           </button>
         </div>
-      </header>
+      </TitleBar>
 
       {/* Main Content Area */}
       {profileStorageError && (

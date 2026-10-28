@@ -119,6 +119,28 @@ export function initTauriBridge(): void {
 
     quitApp: () => invokeWithError<void>('quit_app'),
 
+    windowAction: (action: 'minimize' | 'toggleMaximize' | 'close' | 'startDragging') =>
+      invokeWithError<void>('window_action', { action }),
+    getWindowMaximized: () => invokeWithError<boolean>('get_window_maximized'),
+    onWindowMaximized: (callback: (maximized: boolean) => void) => {
+      let unlisten: (() => void) | null = null;
+      let disposed = false;
+      if (listen) {
+        listen<boolean>('window:maximized', (event) => {
+          if (!disposed) callback(event.payload);
+        })
+          .then((cleanup) => {
+            if (disposed) cleanup();
+            else unlisten = cleanup;
+          })
+          .catch(() => {});
+      }
+      return () => {
+        disposed = true;
+        unlisten?.();
+      };
+    },
+
     openExternalUrl: (url: string) =>
       invokeWithError<{ ok: boolean }>('open_external_url', { url }),
 

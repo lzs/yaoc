@@ -3048,3 +3048,61 @@ textarea {
     animation: none;
   }
 }
+
+/* The existing full-height app header doubles as window chrome. */
+.integrated-titlebar {
+  user-select: none;
+  padding-right: 0;
+}
+.integrated-titlebar .brand {
+  flex-shrink: 0;
+}
+.integrated-titlebar .connection-bar {
+  margin-left: auto;
+  min-width: 0;
+}
+.integrated-titlebar .connection-bar > .select-field {
+  width: 260px;
+  min-width: 120px;
+  flex: 0 1 260px;
+}
+.integrated-titlebar .connection-bar > button {
+  flex-shrink: 0;
+}
+.window-controls {
+  display: flex;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+.window-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: default;
+}
+.window-control:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+.window-control:active {
+  background: var(--border-strong);
+}
+.window-control:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -3px;
+}
+.window-close:hover,
+.window-close:active {
+  background: #c42b1c;
+  color: white;
+}
+.macos-titlebar {
+  padding-left: 96px;
+  padding-right: 16px;
+}

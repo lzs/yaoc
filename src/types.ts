@@ -176,6 +176,12 @@ declare global {
       request: (method: string, params?: any, timeoutMs?: number) => Promise<any>;
       setGlobalHotkey?: (hotkey: string) => Promise<{ ok: boolean; hotkey: string }>;
       quitApp?: () => Promise<void>;
+      windowAction?: (
+        action: 'minimize' | 'toggleMaximize' | 'close' | 'startDragging'
+      ) => Promise<void>;
+      getWindowMaximized?: () => Promise<boolean>;
+      onWindowMaximized?: (callback: (maximized: boolean) => void) => () => void;
+
       openExternalUrl?: (url: string) => Promise<{ ok: boolean }>;
       setTaskbarProgress?: (
         status?: 'none' | 'normal' | 'indeterminate' | 'paused' | 'error',

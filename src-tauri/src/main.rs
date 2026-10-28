@@ -2,6 +2,7 @@
 
 mod efficiency;
 mod storage;
+mod window_chrome;
 mod window_state;
 
 use storage::atomic_write;
@@ -500,7 +501,7 @@ fn decrypt_gateway_profile(mut profile: GatewayProfile) -> Result<GatewayProfile
 fn get_system_info(state: State<'_, Arc<GatewayState>>) -> Value {
     log_boot("IPC get_system_info called");
     json!({
-        "platform": "win32",
+        "platform": if cfg!(target_os = "windows") { "win32" } else if cfg!(target_os = "macos") { "darwin" } else { std::env::consts::OS },
         "arch": std::env::consts::ARCH,
         "runtime": "tauri-v2",
         "encryptedStorage": cfg!(target_os = "windows"),
@@ -2143,6 +2144,9 @@ fn main() {
                     refresh_efficiency_mode(window.app_handle());
                 }
                 tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) => {
+                    if let Ok(maximized) = window_state::is_maximized(window) {
+                        let _ = window.emit("window:maximized", maximized);
+                    }
                     refresh_efficiency_mode(window.app_handle());
                 }
                 _ => {}
@@ -2158,6 +2162,13 @@ fn main() {
             spawn_global_hotkey_listener(app.handle().clone(), initial_hotkey);
 
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(not(target_os = "macos"))]
+                window.set_decorations(false)?;
+                #[cfg(target_os = "macos")]
+                {
+                    window.set_title_bar_style(tauri::TitleBarStyle::Overlay)?;
+                    window.set_title("")?;
+                }
                 if let Err(error) = window_state::restore(&window.as_ref().window()) {
                     log_boot(&format!("Could not restore window state: {error}"));
                 }
@@ -2175,6 +2186,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_system_info,
+            window_chrome::window_action,
+            window_chrome::get_window_maximized,
             load_profiles,
             save_profiles,
             gateway_connect,

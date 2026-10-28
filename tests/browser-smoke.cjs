@@ -78,8 +78,29 @@ async function openApp(browser, options = {}) {
     window.testSaves = [];
     window.testHotkeys = [];
     window.testSessionRows = options.sessionRows;
+    window.testWindowActions = [];
+    let maximized = Boolean(options.maximized);
+    const windowCallbacks = new Set();
+
     window.openclawApi = {
-      getSystemInfo: async () => ({ platform: 'win32', arch: 'x64', runtime: 'test' }),
+      windowAction: async (action) => {
+        window.testWindowActions.push(action);
+        if (action === 'toggleMaximize') {
+          maximized = !maximized;
+          for (const callback of windowCallbacks) callback(maximized);
+        }
+      },
+      getWindowMaximized: async () => maximized,
+      onWindowMaximized: (callback) => {
+        windowCallbacks.add(callback);
+        return () => windowCallbacks.delete(callback);
+      },
+
+      getSystemInfo: async () => ({
+        platform: options.platform || 'win32',
+        arch: 'x64',
+        runtime: 'test',
+      }),
       loadProfiles: async () => {
         if (options.loadError) throw new Error('Unreadable profile fixture');
         return {
@@ -208,6 +229,58 @@ async function openApp(browser, options = {}) {
       : {}),
   });
   try {
+    for (const theme of ['dark', 'light']) {
+      const page = await openApp(browser, { theme, maximized: true });
+      const header = page.locator('.integrated-titlebar');
+      await header.waitFor();
+      const restore = page.getByRole('button', { name: 'Restore window', exact: true });
+      await restore.waitFor();
+      assert.equal((await header.boundingBox()).height, 52);
+      assert.equal((await header.locator('.brand img').boundingBox()).width, 24);
+      await restore.click();
+      await page.getByRole('button', { name: 'Maximize window', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Maximize window', exact: true }).click();
+      await restore.waitFor();
+      await page.getByRole('button', { name: 'Minimize window', exact: true }).click();
+      await page.getByRole('button', { name: 'Close window', exact: true }).click();
+      assert.deepEqual(await page.evaluate(() => window.testWindowActions), [
+        'toggleMaximize',
+        'toggleMaximize',
+        'minimize',
+        'close',
+      ]);
+      await header.locator('.brand').dispatchEvent('mousedown', { button: 0, detail: 1 });
+      await header.locator('.brand').dispatchEvent('mousedown', { button: 0, detail: 2 });
+      assert.deepEqual((await page.evaluate(() => window.testWindowActions)).slice(-2), [
+        'startDragging',
+        'toggleMaximize',
+      ]);
+      const count = await page.evaluate(() => window.testWindowActions.length);
+      await page
+        .getByRole('combobox', { name: 'Active Gateway profile' })
+        .dispatchEvent('mousedown', { button: 0, detail: 1 });
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('dialog', { name: 'Settings' }).waitFor();
+      assert.equal(await page.evaluate(() => window.testWindowActions.length), count);
+      await page.keyboard.press('Escape');
+      for (const width of [1360, 960]) {
+        await page.setViewportSize({ width, height: 860 });
+        assert.equal(await header.evaluate((el) => el.scrollWidth > el.clientWidth), false);
+        const select = await header.getByRole('combobox').boundingBox();
+        assert.ok(select.width >= 120);
+        await header.screenshot({
+          path: path.join(root, '.local', `titlebar-${theme}-${width}.png`),
+        });
+      }
+      await page.close();
+    }
+    {
+      const page = await openApp(browser, { platform: 'darwin' });
+      await page.locator('.macos-titlebar').waitFor();
+      assert.equal(await page.getByRole('group', { name: 'Window controls' }).count(), 0);
+      assert.ok((await page.locator('.brand').boundingBox()).x >= 96);
+      await page.close();
+    }
     for (const theme of ['dark', 'light']) {
       const page = await openApp(browser, { theme });
       await page.locator('.message-body').waitFor();

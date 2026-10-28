@@ -177,7 +177,7 @@ pub fn track(window: &Window) {
 // Tao's cached maximized flag can lag behind move/resize events. Query the
 // Windows style directly so transitional maximized bounds never replace the
 // normal restore bounds.
-fn is_maximized(window: &Window) -> tauri::Result<bool> {
+pub(crate) fn is_maximized(window: &Window) -> tauri::Result<bool> {
     #[cfg(target_os = "windows")]
     {
         #[link(name = "user32")]
