@@ -226,11 +226,11 @@ YAOC integrates deeply with the Windows shell to provide immediate peripheral fe
    - **Pending Tool Approvals:** When an `exec.approval.requested` event arrives and awaits operator decision (`approvals.length > 0`), taskbar progress transitions to `ProgressBarStatus::Paused` (yellow / amber). YAOC simultaneously calls `request_attention("critical")` (`UserAttentionType::Critical`), flashing the taskbar button continuously until the user focuses the window.
    - **Idle State:** When all runs finish and no approvals remain, the progress bar is cleared (`ProgressBarStatus::None`), and any pending attention requests are dismissed on window focus.
 2. **Native Windows Toast Notifications (`show_notification`):**
-   - Integrated via `tauri-plugin-notification` (`app.notification().builder()`).
+   - Installed mode uses `tauri-plugin-notification` (`app.notification().builder()`); portable mode uses `native_notifications.rs` and `tauri-winrt-notification` with its own registry-only identity.
    - Dispatches native Windows Action Center toasts when:
      - All tracked runs in an agent session complete successfully while YAOC is unfocused or minimized (`!document.hasFocus() || document.hidden`). `RunCompletionTracker` correlates events and send acknowledgments by run ID and confirms terminal outcomes through `agent.wait`. Chat finals alone do not trigger success notifications. Errors, aborts, disconnects, and failed sends never generate a success toast; stale and duplicate terminal events cannot complete a newer run. If `agent.wait` is unavailable, only a matching explicit lifecycle end can confirm success; a chat-only terminal clears busy state silently.
      - A tool execution approval is requested while YAOC is unfocused.
-   - **Notification ownership:** NSIS owns the installed shortcut and AUMID registration. Runtime code only selects the process identity. Portable mode uses a separate process AUMID with an in-app banner and taskbar attention; it creates no notification registration or shortcut.
+   - **Notification ownership:** NSIS owns the installed shortcut and AUMID registration. Runtime code only selects the process identity. Portable mode registers a separate per-user AUMID and cached PNG icon, then uses WinRT toasts directly; it never creates a shortcut or modifies installed registration.
    - Respects user toggles in **Settings $\rightarrow$ General** (`notificationsEnabled`, default `true`), persisted in `gateway-profiles.json` and mirrored in `localStorage`.
 3. **Low-Overhead Win32 Audio Chimes (`play_notification_sound`):**
    - Invokes Win32 `MessageBeep(u_type)` via native FFI to `user32.dll`:
@@ -457,4 +457,4 @@ The same application binary ships inside a per-user NSIS installer and as a stan
 
 Only installed mode downloads/installs updates through tauri-plugin-updater with mandatory installer signatures. Portable mode reports official releases and opens the manual download page. The old portable replacement and signing protocol are removed. The renderer blocks installer restart while work is unsaved or active.
 
-The pinned custom NSIS template preserves all shared data and unrelated files, removes the data-deletion UI, and checks executable locks by installation path. Installer hooks create metadata and own installed toast registration; portable mode uses an in-app banner and taskbar attention without registry or shortcut writes. See [UPDATES.md](UPDATES.md) for packaging, signing, recovery limits and native validation.
+The pinned custom NSIS template preserves all shared data and unrelated files, removes the data-deletion UI, and checks executable locks by installation path. Installer hooks create metadata and own installed toast registration; portable mode uses registry-only native WinRT toast registration under its own identity, with no shortcut writes. See [UPDATES.md](UPDATES.md) for packaging, signing, recovery limits and native validation.

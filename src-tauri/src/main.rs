@@ -3,6 +3,8 @@
 mod distribution;
 mod efficiency;
 mod instance;
+#[cfg(windows)]
+mod native_notifications;
 mod storage;
 mod updater;
 mod window_chrome;
@@ -1457,13 +1459,9 @@ fn show_notification(
     if sound.unwrap_or(false) {
         play_notification_sound(None);
     }
+    #[cfg(windows)]
     if distribution::current().mode == distribution::Mode::Portable {
-        app.emit("yaoc:notification", json!({ "title": title, "body": body }))
-            .map_err(|e| e.to_string())?;
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.request_user_attention(Some(tauri::UserAttentionType::Informational));
-        }
-        return Ok(());
+        return native_notifications::show_portable(app, &title, &body);
     }
     match app.notification().builder().title(title).body(body).show() {
         Ok(()) => {
@@ -1474,23 +1472,6 @@ fn show_notification(
             log_boot(&format!("show_notification show() error: {e}"));
             Err(e.to_string())
         }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn setup_windows_toast_support() {
-    #[link(name = "shell32")]
-    extern "system" {
-        fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
-    }
-    let id = if distribution::current().mode == distribution::Mode::Installed {
-        "ai.openclaw.chat.lite"
-    } else {
-        "ai.openclaw.chat.lite.portable"
-    };
-    let wide: Vec<u16> = id.encode_utf16().chain(Some(0)).collect();
-    unsafe {
-        SetCurrentProcessExplicitAppUserModelID(wide.as_ptr());
     }
 }
 
@@ -2053,7 +2034,11 @@ fn main() {
     }
     log_boot("main() started");
     #[cfg(target_os = "windows")]
-    setup_windows_toast_support();
+    if let Err(error) = native_notifications::initialize() {
+        log_boot(&format!(
+            "Windows notification initialization failed: {error}"
+        ));
+    }
     let gw_state = match GatewayState::new() {
         Ok(state) => Arc::new(state),
         Err(error) => {

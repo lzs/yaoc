@@ -172,9 +172,6 @@ declare global {
 
   interface Window {
     openclawApi?: {
-      onNotification?: (
-        callback: (notification: { title: string; body: string }) => void
-      ) => () => void;
       checkForUpdate?: () => Promise<UpdateInfo | null>;
       downloadUpdate?: () => Promise<void>;
       installUpdate?: () => Promise<void>;

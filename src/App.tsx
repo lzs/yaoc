@@ -1,5 +1,4 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import NotificationBanner from './NotificationBanner';
 import UpdateSettings from './UpdateSettings';
 import {
   ArrowUp,
@@ -4574,7 +4573,6 @@ export default function App() {
         )}
       </div>
 
-      <NotificationBanner />
       {/* General settings and Gateway Profiles */}
       {showProfileModal && (
         <div className="modal-backdrop" onClick={() => setShowProfileModal(false)}>
@@ -5134,8 +5132,7 @@ export default function App() {
                         </p>
                         {sysInfo.distribution.mode === 'portable' && (
                           <p className="settings-help">
-                            Notifications appear in YAOC with taskbar attention; Windows toast
-                            notifications require the installed version.
+                            Windows notifications use the separate YAOC Portable identity.
                           </p>
                         )}
                       </div>

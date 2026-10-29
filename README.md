@@ -21,7 +21,7 @@ YAOC is a small, lightweight, self-contained desktop client designed to have ver
 
 **Requires Windows 11 (x64 or ARM64).** Choose `yaoc-x64-setup.exe` for a per-user installation on Intel/AMD PCs, or `yaoc-arm64-setup.exe` for Windows on ARM. Alternatively, run the standalone `yaoc-x64.exe` or `yaoc-arm64.exe` without an installer. Both modes share settings in `%APPDATA%\yaoc` and the same browser profile; only one copy runs per Windows user. Local outputs are in `release/` and excluded from source control. Published binaries, when available, belong in GitHub Releases.
 
-Use **Settings → About → Check for updates** for official releases. Installed copies download and verify a signed installer before **Update and restart**. Standalone copies offer **Open download page**; quit YAOC and replace the executable manually. Shared settings survive replacement and uninstall. Installed copies use Windows toast notifications; standalone copies use an in-app banner and taskbar attention. See the [Update and publishing guide](docs/UPDATES.md) for signing setup and details.
+Use **Settings → About → Check for updates** for official releases. Installed copies download and verify a signed installer before **Update and restart**. Standalone copies offer **Open download page**; quit YAOC and replace the executable manually. Shared settings survive replacement and uninstall. Both installed and standalone copies use Windows toast notifications, with separate identities. See the [Update and publishing guide](docs/UPDATES.md) for signing setup and details.
 
 ### Connect to a Gateway
 

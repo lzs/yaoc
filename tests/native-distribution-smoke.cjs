@@ -15,7 +15,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const local = path.join(testRoot, 'local');
   for (const dir of [portable, installed, appdata, local]) fs.mkdirSync(dir, { recursive: true });
   for (const dir of [portable, installed])
-    fs.copyFileSync(path.join(root, 'release/yaoc-x64.exe'), path.join(dir, 'yaoc.exe'));
+    fs.copyFileSync(
+      process.env.YAOC_NATIVE_TEST_EXE || path.join(root, 'release/yaoc-x64.exe'),
+      path.join(dir, 'yaoc.exe')
+    );
   const marker = JSON.stringify({ formatVersion: 1, installDirectory: installed });
   fs.writeFileSync(
     path.join(installed, 'install-metadata.json'),
@@ -23,7 +26,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   );
   const server = net.createServer();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port;
+  let port = server.address().port;
   await new Promise((resolve) => server.close(resolve));
   const env = {
     ...process.env,
@@ -31,6 +34,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     LOCALAPPDATA: local,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=' + port,
   };
+  const portableKey = 'HKCU\\Software\\Classes\\AppUserModelId\\ai.openclaw.chat.lite.portable';
+  const installedKey = 'HKCU\\Software\\Classes\\AppUserModelId\\ai.openclaw.chat.lite';
+  const registryBackup = path.join(testRoot, 'portable-registration.reg');
+  const previousPortable =
+    cp.spawnSync('reg.exe', ['export', portableKey, registryBackup, '/y'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    }).status === 0;
+  const installedBefore = cp.spawnSync('reg.exe', ['query', installedKey], {
+    encoding: 'utf8',
+    windowsHide: true,
+  }).stdout;
   const children = [];
   let browser;
   const launch = (directory) => {
@@ -67,11 +82,51 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     assert.equal(info.distribution.mode, 'portable');
     assert.equal(info.distribution.dataDirectory, path.join(appdata, 'yaoc'));
     await page.evaluate(() => localStorage.setItem('yaoc.native-mode-test', 'shared'));
-    await page.evaluate(() =>
-      window.openclawApi.showNotification('Portable test', 'Notification fallback works', false)
+    const body = 'YAOC native portable test ' + Date.now();
+    await page.evaluate(() => window.openclawApi.windowAction('close'));
+    await page.evaluate(
+      (body) => window.openclawApi.showNotification('Portable Windows toast', body, false),
+      body
     );
-    await page.getByRole('status').filter({ hasText: 'Notification fallback works' }).waitFor();
-    await page.screenshot({ path: path.join(testRoot, 'portable-notification.png') });
+    assert.equal(await page.locator('.notification-banner').count(), 0);
+    let delivered = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const command =
+        "$null=[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]; $items=[Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory('ai.openclaw.chat.lite.portable'); @($items | Where-Object { $_.Content.GetXml().Contains('" +
+        body +
+        "') }).Count";
+      const result = cp.spawnSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', command],
+        { encoding: 'utf8', windowsHide: true }
+      );
+      if (result.status !== 0) throw Error('Cannot inspect native toast history: ' + result.stderr);
+      if (Number(result.stdout.trim()) > 0) {
+        delivered = true;
+        break;
+      }
+      await sleep(500);
+    }
+    assert(delivered, 'Portable toast was not found in Windows Notification Center');
+    const portableRegistration = cp.spawnSync('reg.exe', ['query', portableKey], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    assert.equal(portableRegistration.status, 0);
+    assert(
+      portableRegistration.stdout.includes(
+        path.join(local, 'ai.openclaw.chat.lite', 'notifications', 'portable.png')
+      )
+    );
+    const installedAfter = cp.spawnSync('reg.exe', ['query', installedKey], {
+      encoding: 'utf8',
+      windowsHide: true,
+    }).stdout;
+    assert.equal(
+      installedAfter,
+      installedBefore,
+      'Portable launch modified installed notification registration'
+    );
     for (const method of ['downloadUpdate', 'installUpdate']) {
       const error = await page.evaluate(async (method) => {
         try {
@@ -104,6 +159,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     });
     await browser.close().catch(() => {});
     browser = null;
+    // WebView2 may leave its debug endpoint alive briefly after the parent exits.
+    // Wait for it to close and use a fresh port for the next process.
+    for (let i = 0; i < 50; i++) {
+      try {
+        await fetch('http://127.0.0.1:' + port + '/json/version');
+      } catch {
+        break;
+      }
+      await sleep(100);
+    }
+    const nextServer = net.createServer();
+    await new Promise((resolve) => nextServer.listen(0, '127.0.0.1', resolve));
+    port = nextServer.address().port;
+    await new Promise((resolve) => nextServer.close(resolve));
+    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=' + port;
     launch(installed);
     page = await connect();
     info = await page.evaluate(() => window.openclawApi.getSystemInfo());
@@ -115,11 +185,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     assert.equal(info.distribution.webviewDirectory, path.join(local, 'ai.openclaw.chat.lite'));
     await page.evaluate(() => window.openclawApi.quitApp()).catch(() => {});
     console.log(
-      'PASS: native portable/installed detection (Unicode metadata), shared WebView2 localStorage, second-launch exit, portable backend guards and notification banner.'
+      'PASS: native portable/installed detection (Unicode metadata), shared WebView2 localStorage, second-launch exit, portable backend guards and native Windows toasts while hidden.'
     );
   } finally {
     if (browser) await browser.close().catch(() => {});
     for (const child of children) if (child.exitCode === null) child.kill();
+    cp.spawnSync('reg.exe', ['delete', portableKey, '/f'], { stdio: 'ignore', windowsHide: true });
+    if (previousPortable)
+      cp.spawnSync('reg.exe', ['import', registryBackup], { stdio: 'ignore', windowsHide: true });
     // Leave isolated data under .local for inspection; never remove real user profiles.
     console.log('Isolated native test data: ' + testRoot);
   }

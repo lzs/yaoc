@@ -1,6 +1,6 @@
 [package]
 name = "yaoc"
-version = "2026.1.0"
+version = "2026.1.0-dev10291022"
 description = "Lightweight OpenClaw Gateway Chat & Workspace Client for Windows (x64 & ARM64)"
 license = "MIT"
 authors = ["Lai Zit Seng"]
@@ -41,6 +41,10 @@ semver = { version = "1", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["native-tls-no-alpn"] }
 tempfile = "3"
 tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["native-tls", "zip"] }
+
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "=0.8.1"
+windows-registry = "=0.6.1"
 
 [patch.crates-io]
 webview2-com-sys = { path = "vendor/webview2-com-sys" }

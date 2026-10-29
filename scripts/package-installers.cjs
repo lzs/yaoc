@@ -83,6 +83,7 @@ try {
   });
   if (packaged.status !== 0) throw new Error('Portable packaging failed');
   if (official) require('./installer-update-metadata.cjs').generate();
+  else fs.rmSync(path.join(root, 'release', 'installer-update.json'), { force: true });
 } catch (e) {
   console.error(e.message);
   process.exitCode = 1;
