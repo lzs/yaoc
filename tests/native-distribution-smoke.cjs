@@ -34,8 +34,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     LOCALAPPDATA: local,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=' + port,
   };
-  const portableKey = 'HKCU\\Software\\Classes\\AppUserModelId\\ai.openclaw.chat.lite.portable';
-  const installedKey = 'HKCU\\Software\\Classes\\AppUserModelId\\ai.openclaw.chat.lite';
+  const portableKey = 'HKCU\\Software\\Classes\\AppUserModelId\\io.github.lzs.yaoc.portable';
+  const installedKey = 'HKCU\\Software\\Classes\\AppUserModelId\\io.github.lzs.yaoc';
   const registryBackup = path.join(testRoot, 'portable-registration.reg');
   const previousPortable =
     cp.spawnSync('reg.exe', ['export', portableKey, registryBackup, '/y'], {
@@ -92,7 +92,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     let delivered = false;
     for (let attempt = 0; attempt < 8; attempt++) {
       const command =
-        "$null=[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]; $items=[Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory('ai.openclaw.chat.lite.portable'); @($items | Where-Object { $_.Content.GetXml().Contains('" +
+        "$null=[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]; $items=[Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory('io.github.lzs.yaoc.portable'); @($items | Where-Object { $_.Content.GetXml().Contains('" +
         body +
         "') }).Count";
       const result = cp.spawnSync(
@@ -115,7 +115,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     assert.equal(portableRegistration.status, 0);
     assert(
       portableRegistration.stdout.includes(
-        path.join(local, 'ai.openclaw.chat.lite', 'notifications', 'portable.png')
+        path.join(local, 'io.github.lzs.yaoc', 'notifications', 'portable.png')
       )
     );
     const installedAfter = cp.spawnSync('reg.exe', ['query', installedKey], {
@@ -182,7 +182,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       await page.evaluate(() => localStorage.getItem('yaoc.native-mode-test')),
       'shared'
     );
-    assert.equal(info.distribution.webviewDirectory, path.join(local, 'ai.openclaw.chat.lite'));
+    assert.equal(info.distribution.webviewDirectory, path.join(local, 'io.github.lzs.yaoc'));
     await page.evaluate(() => window.openclawApi.quitApp()).catch(() => {});
     console.log(
       'PASS: native portable/installed detection (Unicode metadata), shared WebView2 localStorage, second-launch exit, portable backend guards and native Windows toasts while hidden.'

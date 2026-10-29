@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const { version } = require('../package.json');
-const id = 'ai.openclaw.chat.lite.integration-test';
+const id = 'io.github.lzs.yaoc.integration-test';
 const name = 'YAOC Integration Test';
 const hash = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

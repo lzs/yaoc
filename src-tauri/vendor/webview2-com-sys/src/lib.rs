@@ -236,7 +236,7 @@ mod embedded_loader {
             let base_dir = std::env::var_os("LOCALAPPDATA")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(std::env::temp_dir)
-                .join("ai.openclaw.chat.lite");
+                .join("io.github.lzs.yaoc");
             prune_stale_fallback_userdata_dirs(&base_dir);
             let lock_file = base_dir.join("EBWebView").join("lockfile");
             let is_locked = if lock_file.exists() {

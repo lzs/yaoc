@@ -78,7 +78,7 @@ pub fn initialize() -> Result<(), String> {
         mode: detect(&executable)?,
         executable,
         data_directory: crate::storage::user_storage_dir()?,
-        webview_directory: local.join("ai.openclaw.chat.lite"),
+        webview_directory: local.join("io.github.lzs.yaoc"),
     };
     DISTRIBUTION
         .set(distribution)

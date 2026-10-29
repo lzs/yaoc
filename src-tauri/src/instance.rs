@@ -21,7 +21,7 @@ pub fn acquire() -> Result<Option<Instance>, String> {
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .ok_or("LOCALAPPDATA must be an absolute directory")?
-        .join("ai.openclaw.chat.lite");
+        .join("io.github.lzs.yaoc");
     acquire_at(root)
 }
 fn acquire_at(root: PathBuf) -> Result<Option<Instance>, String> {

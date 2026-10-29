@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "YAOC",
-  "version": "2026.1.0-dev10291022",
-  "identifier": "ai.openclaw.chat.lite",
+  "version": "2026.1.0-dev10291047",
+  "identifier": "io.github.lzs.yaoc",
   "build": {
     "beforeDevCommand": "npm.cmd run dev:vite",
     "devUrl": "http://localhost:5173",

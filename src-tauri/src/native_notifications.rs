@@ -6,9 +6,9 @@ use tauri::{AppHandle, Manager};
 use tauri_winrt_notification::Toast;
 use windows_registry::CURRENT_USER;
 
-pub const PORTABLE_ID: &str = "ai.openclaw.chat.lite.portable";
-const INSTALLED_ID: &str = "ai.openclaw.chat.lite";
-const REGISTRY_PATH: &str = r"Software\Classes\AppUserModelId\ai.openclaw.chat.lite.portable";
+pub const PORTABLE_ID: &str = "io.github.lzs.yaoc.portable";
+const INSTALLED_ID: &str = "io.github.lzs.yaoc";
+const REGISTRY_PATH: &str = r"Software\Classes\AppUserModelId\io.github.lzs.yaoc.portable";
 const ICON: &[u8] = include_bytes!("../icons/128x128.png");
 
 fn register_portable(icon: &Path) -> Result<(), String> {
