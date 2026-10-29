@@ -87,6 +87,20 @@ export function initTauriBridge(): void {
   };
 
   const api = {
+    onNotification: (callback: (notification: { title: string; body: string }) => void) => {
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      listen?.<{ title: string; body: string }>('yaoc:notification', (evt) => {
+        if (!disposed) callback(evt.payload);
+      }).then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      });
+      return () => {
+        disposed = true;
+        unlisten?.();
+      };
+    },
     checkForUpdate: () => invokeWithError<import('./types').UpdateInfo | null>('check_for_update'),
     downloadUpdate: () => invokeWithError<void>('download_update'),
     installUpdate: () => invokeWithError<void>('install_update'),

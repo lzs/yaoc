@@ -1,4 +1,16 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=YAOC_UPDATER_PUBLIC_KEY");
+    if !std::env::var("CARGO_PKG_VERSION")
+        .unwrap_or_default()
+        .contains('-')
+    {
+        assert!(
+            !std::env::var("YAOC_UPDATER_PUBLIC_KEY")
+                .unwrap_or_default()
+                .is_empty(),
+            "Official builds require YAOC_UPDATER_PUBLIC_KEY"
+        );
+    }
     println!("cargo:rerun-if-changed=icons/icon.ico");
     println!("cargo:rerun-if-changed=icons/128x128.png");
     let windows = tauri_build::WindowsAttributes::new().app_manifest(

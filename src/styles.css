@@ -3106,3 +3106,20 @@ textarea {
   padding-left: 96px;
   padding-right: 16px;
 }
+
+.notification-banner {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10000;
+  max-width: 380px;
+  max-height: 50vh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 16px;
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px #0006;
+}

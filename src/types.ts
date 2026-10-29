@@ -122,6 +122,12 @@ export interface SystemInfo {
   arch: string;
   runtime?: string;
   encryptedStorage?: boolean;
+  distribution?: {
+    mode: 'installed' | 'portable';
+    executable: string;
+    dataDirectory: string;
+    webviewDirectory: string;
+  };
   deviceIdentity?: {
     deviceId: string;
     publicKey: string;
@@ -156,7 +162,7 @@ export interface UiSessionState {
 export interface UpdateInfo {
   version: string;
   releaseUrl: string;
-  size: number;
+  canInstall: boolean;
 }
 
 declare global {
@@ -166,6 +172,9 @@ declare global {
 
   interface Window {
     openclawApi?: {
+      onNotification?: (
+        callback: (notification: { title: string; body: string }) => void
+      ) => () => void;
       checkForUpdate?: () => Promise<UpdateInfo | null>;
       downloadUpdate?: () => Promise<void>;
       installUpdate?: () => Promise<void>;

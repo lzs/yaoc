@@ -110,7 +110,7 @@ async function openApp(browser, options = {}) {
         return {
           version: '2026.2.0',
           releaseUrl: 'https://github.com/lzs/yaoc/releases/tag/v2026.2.0',
-          size: 1024,
+          canInstall: window.testUpdateMode !== 'portable',
         };
       },
       downloadUpdate: async () => {
@@ -788,6 +788,20 @@ async function openApp(browser, options = {}) {
       });
       await about.getByRole('button', { name: 'Check for updates', exact: true }).click();
       await about.getByRole('alert').filter({ hasText: 'No update manifest' }).waitFor();
+      await page.evaluate(() => {
+        window.testUpdateMode = 'portable';
+      });
+      await about.getByRole('button', { name: 'Check for updates', exact: true }).click();
+      await about.getByText(/YAOC 2026.2.0 is available/).waitFor();
+      assert.equal(
+        await about.getByRole('button', { name: 'Download update', exact: true }).count(),
+        0
+      );
+      assert.equal(
+        await about.getByRole('button', { name: 'Update and restart', exact: true }).count(),
+        0
+      );
+      await about.getByRole('button', { name: 'Open download page', exact: true }).waitFor();
       await page.getByRole('tab', { name: 'About', exact: true }).focus();
       await page.keyboard.press('ArrowDown');
       assert.equal(

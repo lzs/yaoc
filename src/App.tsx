@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import NotificationBanner from './NotificationBanner';
 import UpdateSettings from './UpdateSettings';
 import {
   ArrowUp,
@@ -1243,7 +1244,12 @@ export default function App() {
         uiStateRef.current = mergedUi;
         if (typeof mergedUi.globalHotkey === 'string') {
           setGlobalHotkey(mergedUi.globalHotkey);
-          api.setGlobalHotkey?.(mergedUi.globalHotkey).catch(() => {});
+          api.setGlobalHotkey?.(mergedUi.globalHotkey).catch((error: unknown) => {
+            setHotkeyStatusMsg({
+              text: error instanceof Error ? error.message : String(error),
+              error: true,
+            });
+          });
         }
         if (typeof mergedUi.notificationsEnabled === 'boolean') {
           setNotificationsEnabled(mergedUi.notificationsEnabled);
@@ -4568,6 +4574,7 @@ export default function App() {
         )}
       </div>
 
+      <NotificationBanner />
       {/* General settings and Gateway Profiles */}
       {showProfileModal && (
         <div className="modal-backdrop" onClick={() => setShowProfileModal(false)}>
@@ -5069,7 +5076,7 @@ export default function App() {
                               : 'rgba(245, 158, 11, 0.16)',
                           color:
                             __APP_CHANNEL__ === 'official'
-                              ? 'var(--text-accent)'
+                              ? 'var(--text-success)'
                               : 'var(--text-warning)',
                         }}
                       >
@@ -5099,16 +5106,40 @@ export default function App() {
                       <span className="session-detail-label">Credential Storage</span>
                       <span className="session-detail-value">
                         {sysInfo?.encryptedStorage !== false ? (
-                          <span style={{ color: 'var(--text-accent)' }}>
+                          <span style={{ color: 'var(--text-success)' }}>
                             Protected (Windows DPAPI)
                           </span>
                         ) : (
-                          <span style={{ color: '#f87171' }}>
+                          <span style={{ color: 'var(--text-warning)' }}>
                             ⚠️ Unencrypted (Non-Windows host)
                           </span>
                         )}
                       </span>
                     </div>
+                    {sysInfo?.distribution && (
+                      <div className="form-row">
+                        <label>
+                          {sysInfo.distribution.mode === 'installed' ? 'Installed' : 'Portable'}
+                        </label>
+                        <p className="settings-help" style={{ overflowWrap: 'anywhere' }}>
+                          {sysInfo.distribution.executable}
+                        </p>
+                        <label>Shared data</label>
+                        <p className="settings-help" style={{ overflowWrap: 'anywhere' }}>
+                          {sysInfo.distribution.dataDirectory}
+                        </p>
+                        <label>Browser data</label>
+                        <p className="settings-help" style={{ overflowWrap: 'anywhere' }}>
+                          {sysInfo.distribution.webviewDirectory}
+                        </p>
+                        {sysInfo.distribution.mode === 'portable' && (
+                          <p className="settings-help">
+                            Notifications appear in YAOC with taskbar attention; Windows toast
+                            notifications require the installed version.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <UpdateSettings
                       restartBlocked={
                         fileContent !== savedFileContent ||

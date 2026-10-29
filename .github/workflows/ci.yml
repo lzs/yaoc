@@ -53,13 +53,15 @@ jobs:
       - run: npm exec playwright install chromium
       - run: npm run test:browser
       - run: npm run notices
-      - run: npm run package:portable
+      - run: npm run package:installers
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: yaoc-windows-beta
           path: |
             release/yaoc-x64.exe
             release/yaoc-arm64.exe
+            release/yaoc-x64-setup.exe
+            release/yaoc-arm64-setup.exe
             release/SHA256SUMS.txt
             release/LICENSE
             release/THIRD_PARTY_LICENSES.txt

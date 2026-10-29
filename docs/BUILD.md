@@ -70,9 +70,9 @@ npm.cmd run dist:all
 npm.cmd run dist:x64
 npm.cmd run dist:arm64
 
-# Rebuild license notices, then stage both binaries and checksums.
+# Rebuild notices, package both NSIS installers, then stage their identical portable payloads.
 npm.cmd run notices
-npm.cmd run package:portable
+npm.cmd run package:installers
 ```
 
 `dist:*` creates Beta builds. Use `npm.cmd run release` only when preparing an official build; `release:x64` and `release:arm64` build a single official target. The version comes from `package.json`; Cargo and Tauri metadata must use the same version.
@@ -81,7 +81,7 @@ Official releases use `major.minor.patch`, such as `2026.1.0`. Normal builds use
 
 The Vite build generates one timestamp for both architectures. After emitting the frontend, `scripts/sync-version.cjs` stamps the same full version into `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` before Cargo runs. These files retain the most recent build version, so the UI, native Gateway identification, and Tauri metadata match. Subsequent builds replace the suffix; official builds remove it. Builds therefore update tracked version metadata. To bump the base version, update the matching manifests and lockfiles together; `npm.cmd run check` verifies consistency.
 
-Raw executables are `src-tauri/target/<target-triple>/release/yaoc.exe`. Packaging writes `release/yaoc-x64.exe`, `release/yaoc-arm64.exe`, and `SHA256SUMS.txt`, with three rolling `.0.exe`/`.1.exe`/`.2.exe` backups. If Windows locks an old backup, quit that running instance before retrying. Distribute the project license and `THIRD_PARTY_LICENSES.txt` with the executables. The checked-in source tree excludes binaries and local build output.
+Raw executables are `src-tauri/target/<target-triple>/release/yaoc.exe`. Packaging writes `release/yaoc-x64.exe`, `release/yaoc-arm64.exe`, and `SHA256SUMS.txt`, with three rolling `.0.exe`/`.1.exe`/`.2.exe` backups in `release/archive/`. A still-running oldest image is moved to `release/archive/.in-use` until a later packaging run can remove it. `package:installers` also writes `yaoc-x64-setup.exe` and `yaoc-arm64-setup.exe`; it captures the patched/signed NSIS payload so the portable executable matches byte-for-byte. See [UPDATES.md](UPDATES.md) for signing configuration and native acceptance commands. Distribute the project license and `THIRD_PARTY_LICENSES.txt` with the executables. The checked-in source tree excludes binaries and local build output.
 
 The root `.cargo/config.toml` supplies both LLVM-MinGW linkers and `-C target-feature=+crt-static`. This avoids a separate `libunwind.dll`. The patched `webview2-com-sys` crate embeds the architecture-specific WebView2 loader. Windows system DLLs and the installed WebView2 Runtime remain runtime dependencies. Do not remove the patch or change `dragDropEnabled: false` without testing attachment drag-and-drop.
 
@@ -93,7 +93,7 @@ Keep test builds in Beta until native validation is complete. On Windows 11 ARM6
 
 Use a dedicated test session and disposable workspace file for real-Gateway testing: pairing/reconnect, streaming and stop, attachments, approvals, model/reasoning changes, and workspace save/load. Also switch sessions while Reset is pending, and switch files or reconnect while Save is pending; completion must not replace another transcript, saved baseline, or Gateway's data. Native ARM64 and real-Gateway checks require manual validation when the build machine cannot provide them.
 
-After validation, explicitly build the official version, regenerate notices, package both architectures, verify `SHA256SUMS.txt`, and publish the intended commits and artifacts. Code signing is not configured; do not describe an unsigned binary as signed. Beta artifacts and official artifacts must not be mixed.
+After validation, explicitly build the official version, regenerate notices, package both architectures, verify `SHA256SUMS.txt`, and publish the intended commits and artifacts. Official packaging requires Tauri updater signing configuration; see UPDATES.md. Windows Authenticode is deliberately not used for either official or Beta builds. Beta artifacts and official artifacts must not be mixed.
 
 ## Maintaining icons
 

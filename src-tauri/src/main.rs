@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod distribution;
 mod efficiency;
+mod instance;
 mod storage;
 mod updater;
 mod window_chrome;
@@ -505,6 +507,7 @@ fn get_system_info(state: State<'_, Arc<GatewayState>>) -> Value {
         "arch": std::env::consts::ARCH,
         "runtime": "tauri-v2",
         "encryptedStorage": cfg!(target_os = "windows"),
+        "distribution": distribution::current(),
         "deviceIdentity": {
             "deviceId": state.identity.device_id,
             "publicKey": state.identity.public_key_base64_url
@@ -1454,6 +1457,14 @@ fn show_notification(
     if sound.unwrap_or(false) {
         play_notification_sound(None);
     }
+    if distribution::current().mode == distribution::Mode::Portable {
+        app.emit("yaoc:notification", json!({ "title": title, "body": body }))
+            .map_err(|e| e.to_string())?;
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.request_user_attention(Some(tauri::UserAttentionType::Informational));
+        }
+        return Ok(());
+    }
     match app.notification().builder().title(title).body(body).show() {
         Ok(()) => {
             log_boot("show_notification show() succeeded");
@@ -1472,92 +1483,15 @@ fn setup_windows_toast_support() {
     extern "system" {
         fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
     }
-
-    use std::os::windows::ffi::OsStrExt;
-    use std::os::windows::process::CommandExt;
-
-    let aumid_wide: Vec<u16> = std::ffi::OsStr::new("ai.openclaw.chat.lite")
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let hr = unsafe { SetCurrentProcessExplicitAppUserModelID(aumid_wide.as_ptr()) };
-    log_boot(&format!(
-        "SetCurrentProcessExplicitAppUserModelID: 0x{hr:08x}"
-    ));
-
-    std::thread::spawn(|| {
-        if let Ok(exe_path) = std::env::current_exe() {
-            let exe_str = exe_path.to_string_lossy();
-            let _ = std::process::Command::new("reg")
-                .args([
-                    "add",
-                    r"HKCU\Software\Classes\AppUserModelId\ai.openclaw.chat.lite",
-                    "/v",
-                    "DisplayName",
-                    "/t",
-                    "REG_SZ",
-                    "/d",
-                    "YAOC",
-                    "/f",
-                ])
-                .creation_flags(0x08000000)
-                .output();
-            let _ = std::process::Command::new("reg")
-                .args([
-                    "add",
-                    r"HKCU\Software\Classes\AppUserModelId\ai.openclaw.chat.lite",
-                    "/v",
-                    "IconUri",
-                    "/t",
-                    "REG_SZ",
-                    "/d",
-                    &exe_str,
-                    "/f",
-                ])
-                .creation_flags(0x08000000)
-                .output();
-            let _ = std::process::Command::new("reg")
-                .args([
-                    "add",
-                    r"HKCU\Software\Classes\AppUserModelId\ai.openclaw.chat.lite",
-                    "/v",
-                    "ShowInActionCenter",
-                    "/t",
-                    "REG_DWORD",
-                    "/d",
-                    "1",
-                    "/f",
-                ])
-                .creation_flags(0x08000000)
-                .output();
-
-            let app_data = std::env::var("APPDATA").unwrap_or_default();
-            if !app_data.is_empty() {
-                let shortcut_dir = std::path::PathBuf::from(&app_data)
-                    .join(r"Microsoft\Windows\Start Menu\Programs");
-                let shortcut_path = shortcut_dir.join("YAOC.lnk");
-                if !shortcut_path.exists() {
-                    let ps_script = format!(
-                        r#"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{}'); $s.TargetPath = '{}'; $s.Description = 'YAOC - OpenClaw Chat'; $s.Save()"#,
-                        shortcut_path.display(),
-                        exe_str
-                    );
-                    let _ = std::process::Command::new("powershell")
-                        .args([
-                            "-NoProfile",
-                            "-NonInteractive",
-                            "-WindowStyle",
-                            "Hidden",
-                            "-Command",
-                            &ps_script,
-                        ])
-                        .creation_flags(0x08000000)
-                        .output();
-                }
-            }
-        }
-    });
+    let id = if distribution::current().mode == distribution::Mode::Installed {
+        "ai.openclaw.chat.lite"
+    } else {
+        "ai.openclaw.chat.lite.portable"
+    };
+    let wide: Vec<u16> = id.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        SetCurrentProcessExplicitAppUserModelID(wide.as_ptr());
+    }
 }
 
 #[tauri::command]
@@ -2105,7 +2039,15 @@ fn log_boot(msg: &str) {
 }
 
 fn main() {
-    if let Err(error) = updater::wait_for_predecessor() {
+    let instance = match instance::acquire() {
+        Ok(Some(instance)) => instance,
+        Ok(None) => return,
+        Err(error) => {
+            show_startup_error(&error);
+            return;
+        }
+    };
+    if let Err(error) = distribution::initialize() {
         show_startup_error(&error);
         return;
     }
@@ -2115,14 +2057,13 @@ fn main() {
     let gw_state = match GatewayState::new() {
         Ok(state) => Arc::new(state),
         Err(error) => {
-            log_boot(&format!("Startup failed: {error}"));
             show_startup_error(&error);
             return;
         }
     };
-    log_boot("GatewayState initialized");
-    tauri::Builder::default()
+    let application = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(gw_state)
         .manage(window_state::WindowState::default())
         .manage(updater::UpdateState::default())
@@ -2157,7 +2098,14 @@ fn main() {
                 _ => {}
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
+            // Build the WebView only after acquiring the user-wide instance lock.
+            let config = app.config().app.windows[0].clone();
+            let _main = tauri::WebviewWindowBuilder::from_config(app, &config)?
+                .data_directory(distribution::current().webview_directory.clone())
+                .build()?;
+            instance.listen(app.handle().clone());
+            app.manage(instance);
             log_boot("tauri setup() hook called");
             let initial_hotkey = load_saved_global_hotkey();
             if let Err(err) = setup_system_tray(app, &initial_hotkey) {
@@ -2209,13 +2157,21 @@ fn main() {
             play_notification_sound,
             request_attention,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|app, event| {
-            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
-                window_state::save(app);
-            }
-        });
+        .build(tauri::generate_context!());
+    let application = match application {
+        Ok(application) => application,
+        Err(error) => {
+            let message = format!("Could not start YAOC: {error}. Check that Microsoft Edge WebView2 Runtime is installed.");
+            log_boot(&message);
+            show_startup_error(&message);
+            return;
+        }
+    };
+    application.run(|app, event| {
+        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            window_state::save(app);
+        }
+    });
 }
 
 fn show_startup_error(message: &str) {

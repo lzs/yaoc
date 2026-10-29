@@ -27,6 +27,10 @@ function add(name, version, directory, license) {
               : name === 'selectors'
                 ? 'third-party-licenses/selectors-LICENSE.txt'
                 : null;
+  if (!texts.length && name.startsWith('@tauri-apps/cli')) {
+    for (const file of ['tauri-cli-LICENSE-MIT.txt', 'tauri-cli-LICENSE-APACHE.txt'])
+      texts.push(fs.readFileSync(path.join(root, 'third-party-licenses', file), 'utf8'));
+  }
   if (!texts.length && fallback) texts.push(fs.readFileSync(path.join(root, fallback), 'utf8'));
   if (!texts.length) missing.push(id);
   records.set(

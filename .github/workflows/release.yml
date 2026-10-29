@@ -13,6 +13,10 @@ jobs:
     runs-on: windows-latest
     environment: release
     timeout-minutes: 45
+    env:
+      YAOC_UPDATER_PUBLIC_KEY: ${{ vars.YAOC_UPDATER_PUBLIC_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     permissions:
       contents: write
     steps:
@@ -57,17 +61,12 @@ jobs:
         env:
           YAOC_TEST_OFFICIAL: '1'
       - run: npm run notices
-      - run: npm run package:portable
-      - name: Sign the update manifest
-        run: npm run updates:sign -- --key-env YAOC_UPDATE_PRIVATE_KEY --password-env YAOC_UPDATE_KEY_PASSWORD
-        env:
-          YAOC_UPDATE_PRIVATE_KEY: ${{ secrets.YAOC_UPDATE_PRIVATE_KEY }}
-          YAOC_UPDATE_KEY_PASSWORD: ${{ secrets.YAOC_UPDATE_KEY_PASSWORD }}
+      - run: npm run package:installers
       - name: Create draft for manual testing and publication
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          gh release create "v$version" release/yaoc-x64.exe release/yaoc-arm64.exe release/latest.json release/SHA256SUMS.txt release/LICENSE release/THIRD_PARTY_LICENSES.txt --draft --title "YAOC $version" --target $env:GITHUB_SHA --generate-notes
+          gh release create "v$version" release/yaoc-x64.exe release/yaoc-arm64.exe release/yaoc-x64-setup.exe release/yaoc-arm64-setup.exe release/yaoc-x64-setup.exe.sig release/yaoc-arm64-setup.exe.sig release/installer-update.json release/SHA256SUMS.txt release/LICENSE release/THIRD_PARTY_LICENSES.txt --draft --title "YAOC $version" --target $env:GITHUB_SHA --generate-notes
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

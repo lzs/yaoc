@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const root = path.resolve(__dirname, '..');
 const release = path.join(root, 'release');
+const archive = path.join(release, 'archive');
 const targets = [
   ['x64', 'x86_64-pc-windows-gnullvm'],
   ['arm64', 'aarch64-pc-windows-gnullvm'],
@@ -21,21 +22,46 @@ try {
   for (const { source } of sources)
     if (!fs.statSync(source).isFile()) throw new Error(`Missing build: ${source}`);
   fs.mkdirSync(release, { recursive: true });
+  fs.mkdirSync(archive, { recursive: true });
+  const inUse = path.join(archive, '.in-use');
+  fs.mkdirSync(inUse, { recursive: true });
+  for (const name of fs.readdirSync(inUse)) {
+    if (/^yaoc-(x64|arm64)-\d+-\d+\.exe$/.test(name)) {
+      try {
+        fs.rmSync(path.join(inUse, name));
+      } catch (error) {
+        if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+      }
+    }
+  }
   for (const { arch, source } of sources) {
     const base = path.join(release, `yaoc-${arch}`);
+    const backupBase = path.join(archive, `yaoc-${arch}`);
     const staged = `${base}.${process.pid}.tmp`;
     try {
       fs.copyFileSync(source, staged);
       if (hash(source) !== hash(staged))
         throw new Error(`Staged ${arch} executable failed verification`);
-      fs.rmSync(`${base}.2.exe`, { force: true });
+      try {
+        fs.rmSync(backupBase + '.2.exe', { force: true });
+      } catch (error) {
+        if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+        // Windows permits renaming a running image but not deleting it. Preserve the
+        // live image outside the three rollback slots until a later packaging run can remove it.
+        const held = path.join(
+          inUse,
+          'yaoc-' + arch + '-' + Date.now() + '-' + process.pid + '.exe'
+        );
+        fs.renameSync(backupBase + '.2.exe', held);
+        console.log('Old running image retained until it exits: ' + held);
+      }
       for (const [old, next] of [
         ['.1.exe', '.2.exe'],
         ['.0.exe', '.1.exe'],
-        ['.exe', '.0.exe'],
       ]) {
-        if (fs.existsSync(base + old)) fs.renameSync(base + old, base + next);
+        if (fs.existsSync(backupBase + old)) fs.renameSync(backupBase + old, backupBase + next);
       }
+      if (fs.existsSync(base + '.exe')) fs.renameSync(base + '.exe', backupBase + '.0.exe');
       fs.renameSync(staged, `${base}.exe`);
       console.log(`Staged yaoc-${arch}.exe`);
     } finally {

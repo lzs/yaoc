@@ -15,7 +15,7 @@ export default function UpdateSettings({ restartBlocked }: { restartBlocked: boo
     if (
       action === 'install' &&
       !window.confirm(
-        'Restart YAOC to apply the verified update? A recovery copy of the current executable will be kept beside it.'
+        'Restart YAOC to apply the verified update? The installer will update the installed copy.'
       )
     )
       return;
@@ -32,7 +32,7 @@ export default function UpdateSettings({ restartBlocked }: { restartBlocked: boo
         setUpdate(found);
         setMessage(
           found
-            ? `YAOC ${found.version} is available (${(found.size / 1048576).toFixed(1)} MB).`
+            ? `YAOC ${found.version} is available.`
             : 'You are up to date with official releases.'
         );
       } else if (action === 'download') {
@@ -56,8 +56,9 @@ export default function UpdateSettings({ restartBlocked }: { restartBlocked: boo
     <div className="form-row" style={{ marginTop: 12 }}>
       <label>Updates</label>
       <p className="settings-help">
-        Check GitHub for official releases. Updates keep this app portable and preserve its
-        filename.
+        Check GitHub for official releases. Installed copies update through the installer. For
+        portable copies, quit YAOC and replace the executable manually; your shared settings remain
+        intact.
         {__APP_CHANNEL__ === 'beta' &&
           ' This Beta checks official releases only; it will not install a different Beta.'}
       </p>
@@ -66,7 +67,7 @@ export default function UpdateSettings({ restartBlocked }: { restartBlocked: boo
           <RefreshCw size={14} className={busy === 'check' ? 'spin-icon' : undefined} />
           {busy === 'check' ? 'Checking…' : 'Check for updates'}
         </button>
-        {update && !ready && (
+        {update?.canInstall && !ready && (
           <button
             className="btn btn-primary"
             disabled={!!busy}
@@ -93,7 +94,7 @@ export default function UpdateSettings({ restartBlocked }: { restartBlocked: boo
             )
           }
         >
-          GitHub releases
+          Open download page
         </button>
       </div>
       {message && (

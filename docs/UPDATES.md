@@ -1,70 +1,82 @@
-# Portable updates and publishing
+# Distribution and updates
 
-YAOC keeps its single-file Windows distribution. Settings → About → **Check for updates** checks official GitHub Releases on demand. There are no background checks or automatic installations. Beta builds can explicitly check for a newer official release; they never fetch another Beta.
+YAOC ships per-user NSIS installers and standalone single-file executables for Windows x64 and ARM64. Both contain the same application executable for a given architecture/version. "Portable" means no installer is required; settings stay on the Windows account.
 
-The client trusts the Ed25519 identity in `src-tauri/update-public.json` (key ID `19504e87acede4ab`). It verifies signed metadata before offering an update, derives URLs from the fixed `lzs/yaoc` repository and validated version, selects the architecture of the running executable, and bounds downloads by the signed size. SHA-256 is checked after downloading and immediately before replacement. Equal versions and downgrades are rejected. Gateway TLS exceptions do not affect updater HTTPS.
+Both modes share %APPDATA%\yaoc and the existing WebView2 profile at %LOCALAPPDATA%\ai.openclaw.chat.lite. DPAPI-protected credentials remain account-bound. A user-profile file lock is acquired before mode detection, credentials, WebView2, notification integration or hotkeys. Another launch signals the primary to show its window and exits. Only one instance can use the shared profile, including across logon sessions (Windows cannot focus another session's desktop).
 
-After downloading, **Update and restart** requires confirmation. Restart is blocked while any session has drafts/attachments, responses are active, or a workspace file is unsaved/is saving. Closing Settings leaves a download running; it never installs automatically. Another check discards the previously staged update. Failed downloads discard temporary files.
+The installer creates install-metadata.json next to yaoc.exe, containing formatVersion 1 and the absolute installDirectory. Metadata may be UTF-8 or NSIS UTF-16LE. Missing metadata means portable; malformed, inaccessible or location-mismatched metadata produces a startup error. Copy a standalone executable into a separate directory to use portable mode. About shows the active mode and executable/data paths.
 
-## Replacement and recovery
+## Updates
 
-`self-replace` is pinned to `1.5.1` behind a small Rust adapter. YAOC creates and flushes a recovery copy beside the original executable before replacement. Windows uses temporary copies to clean up the relocated running image after exit. There is no separately installed updater, service, or installer. The new app waits for its predecessor before opening settings, hotkeys, or the Gateway. The original filename and directory are retained, including renamed executables and paths with spaces/Unicode.
+Both modes check official releases using https://github.com/lzs/yaoc/releases/latest/download/installer-update.json. Versions must be stable SemVer newer than the running version; Beta builds also check official releases only. Discovery uses HTTPS; installer bytes require Tauri signature verification, independently of Authenticode. Discovery information alone never authorizes code execution.
 
-For `yaoc-arm64.exe`, the recovery copy is `.yaoc-arm64.exe.pre-update.exe`, kept until the next update. YAOC restores the original path if a swap fails after moving the old image aside, or if launching the replacement immediately fails. A crash after successful launch requires manual recovery; automatic crash detection/health rollback is not implemented. Power loss can leave helper/staging files behind. Read-only directories or locked backups produce an error; the updater never elevates permissions.
+Installed mode uses tauri-plugin-updater, pinned in Cargo, to download/verify the architecture-specific NSIS installer. The download URL must belong to the exact versioned lzs/yaoc release. Installation verifies the bytes again and passes the running installation directory to NSIS. Existing drafts, attachments, active responses and unsaved/saving files block the confirmed install/restart action. Tauri saves window state before exiting, and NSIS waits for the exact installed executable to become writable before modifying it. No process-name-wide termination is used. Installation errors are reported; there is no automatic startup-crash rollback. Re-run a trusted installer if recovery is needed.
 
-To recover manually: fully quit YAOC, including its tray icon, copy the `.pre-update.exe` backup over the normal executable, and launch the normal executable again. Alternatively download the matching architecture from [GitHub Releases](https://github.com/lzs/yaoc/releases). Older builds without updater support need one manual upgrade to an update-enabled build.
+Portable mode only reports the newer version and opens the official release page. Quit YAOC including the tray icon, download the matching x64/ARM64 executable and replace the old file. Shared settings remain intact. Backend commands reject download and install in portable mode. There is no portable self-replacement implementation, custom signed manifest or predecessor-wait protocol.
 
-## Local signing and manual publication
+## Windows integration and uninstall
 
-YAOC releases are currently signed locally and published manually. No GitHub signing secrets are required. Keep the existing encrypted private key in your Nextcloud-backed directory and its passphrase in your password manager. Do not paste either into chat or source control; reuse the existing signing identity.
+NSIS owns YAOC's standard shortcut, shortcut AUMID and installed notification registration. The application selects its process AUMID but never creates shortcuts or rewrites installed registration. Portable mode uses ai.openclaw.chat.lite.portable and an in-app notification banner with taskbar attention and optional sound. It does not register a portable toast identity in HKCU or create portable shortcuts. Hidden portable windows do not display native toast banners; open YAOC from the taskbar/tray to see the notification. Installed mode uses native Windows toasts.
 
-After building an official release, generating notices, and packaging both architectures, run from the repository root:
+The vendored NSIS template comes from tauri-cli-v2.10.1 under MIT/Apache-2.0. YAOC removes its data-deletion checkbox and deletion code completely; no data-deletion command-line switch exists. Ordinary and silent uninstalls and upgrades preserve both shared data directories. Uninstall deletes only installer-owned application files, metadata and integration. It uses the actual installation directory and leaves unrelated files and portable copies intact. Windows DPAPI master keys are never touched. Upgrade does not remove installed notification identity.
 
-```powershell
-npm.cmd run updates:sign -- --key "$env:USERPROFILE\Nextcloud\CloudDocs\Sync\npm-signing\yaoc-singing\yaoc-update-private.pem"
-```
+## Build and publish
 
-For a separately staged release directory, add `--dir "release\2026.1.0"`. Keep that directory's executables unchanged after signing. Commit the release source before creating its Git tag so the release points to the code used for the build.
-
-The command prompts for a hidden passphrase, checks the key against the embedded identity and checks PE architecture headers. It signs the official version in `package.json` and rejects Beta version strings. Automation can use `--key-env VARIABLE_NAME` for the encrypted PEM and `--password-env VARIABLE_NAME` for its passphrase. Pass only variable names on the command line.
-
-A release tagged exactly `v<version>` must include:
-
-```text
-yaoc-x64.exe
-yaoc-arm64.exe
-latest.json
-SHA256SUMS.txt
-LICENSE
-THIRD_PARTY_LICENSES.txt
-```
-
-On GitHub, create a draft release for the committed source tagged exactly `v<version>`, upload the six files above, and review it before publishing as a non-prerelease marked latest. Keep published assets immutable; correct mistakes with a new version. The optional GitHub Actions draft-release workflow is retained for future automation and is not needed for local signing or manual publication. Update signatures are separate from Authenticode; the executables are not Authenticode-signed.
-
-Asset names stay fixed; version-specific URLs distinguish builds. The client reads `https://github.com/lzs/yaoc/releases/latest/download/latest.json`. Never upload Beta executables under an official manifest. A signature proves identity/integrity, not that a binary was built from the intended source; the publishing process must ensure both.
-
-## Verify a release yourself
-
-From the repository root, run:
+Normal builds remain Beta:
 
 ```powershell
-npm.cmd run updates:verify -- --dir "release\2026.1.0"
+npm.cmd run dist:all
+npm.cmd run notices
+npm.cmd run package:installers
 ```
 
-This read-only command verifies `latest.json` against the embedded public identity, verifies both executables' sizes and SHA-256 hashes against the signed payload, checks `SHA256SUMS.txt` agrees, and checks both licence files are present. It requires no private key or passphrase, prints PASS on success, and exits nonzero with an error on failure. The licence files are checked for presence, not authenticated by the signed manifest. ZIP files are not covered by this check.
+The packaging command bundles existing executables for both targets and then invokes package:portable, preserving three rolling backup generations in release/archive/. If Windows still holds the oldest image open, it is moved to release/archive/.in-use so the active session can continue; a later packaging run removes it after it exits. Outputs are release/yaoc-x64.exe, yaoc-arm64.exe, yaoc-x64-setup.exe and yaoc-arm64-setup.exe, plus notices and portable SHA256SUMS.txt. Embedded WebView2Loader.dll is retained; portable copies still require the WebView2 runtime. NSIS can bootstrap the runtime.
 
-To check files downloaded from GitHub, put the six release assets in a separate directory and supply that directory with `--dir`. Use a trusted checkout of YAOC for the verifier and its public key; downloading an untrusted replacement public key alongside the files would not establish authenticity. Verification does not launch the app or establish that it is free of bugs or malware.
+Beta packaging can be unsigned for local testing. It does not publish official update metadata. If no updater public key was compiled into a Beta, installed update checks explain that installation is unconfigured and direct the user to manual downloads.
 
-## Protocol and maintenance
+Official builds must be requested explicitly. The former npm run updates:keygen command created a PKCS8 identity for the removed custom portable updater. It is not the Tauri signing format. Generate a separate Tauri key pair once, keeping the existing signing directory and leaving the old files untouched. The owner's directory is spelled yaoc-singing as shown below.
 
-`latest.json` contains `keyId`, `payload` (base64 UTF-8 JSON), and `signature` (base64 Ed25519 signature). Sign `YAOC-UPDATE-V1\n` followed by the decoded payload, with an actual LF after V1. The payload has `formatVersion: 1`, `version`, `channel: "official"`, and exactly two assets with `name`, `size`, and lowercase hexadecimal `sha256`. Verification uses the exact signed bytes, without reserializing JSON. Neither manifests nor renderer commands can supply arbitrary executable paths, URLs, or shell commands.
+Run locally (not through chat), and choose a password when prompted:
 
-Version checks prevent downgrades but cannot detect a server withholding a newer release. There is no remote key rotation yet: a transition release signed by the existing key must embed support for the new identity before changing signing keys. Keep the existing key until that transition reaches users.
+```powershell
+Set-Location "$env:USERPROFILE\Nextcloud\CloudDocs\AppProjects\yaoc"
+$yaocSigningDir = "$env:USERPROFILE\Nextcloud\CloudDocs\Sync\npm-signing\yaoc-singing"
+npm.cmd exec -- tauri signer generate -w "$yaocSigningDir\yaoc-tauri-updater.key"
+```
 
-Run dependency audits and native x64/ARM64 update tests before official releases. The swap adapter can be replaced without changing GitHub assets, signature protocol, or installed paths. Automated tests cover signing, tampering, version/architecture/size restrictions, staged-file changes, swap-failure recovery, isolated Windows replacement of a renamed executable, and browser update/error/cancel states. ARM64 compilation does not replace native ARM64 testing.
+Do not use --force or overwrite an existing key. Keep the resulting yaoc-tauri-updater.key and its password securely backed up; yaoc-tauri-updater.key.pub is the shareable public key. Reuse this new Tauri identity for subsequent releases. Do not commit private signing material.
 
-Before first publication, test renamed paths with spaces/Unicode, both native architectures, drafts in other sessions, unsaved files, network failure, locked/unwritable destinations, and manual recovery. A complete live GitHub upgrade requires two published versions or a controlled test feed; building these executables alone does not exercise it.
+Before each official build, configure the same PowerShell session:
 
-## Key generation for a different distribution
+```powershell
+$yaocSigningDir = "$env:USERPROFILE\Nextcloud\CloudDocs\Sync\npm-signing\yaoc-singing"
+$env:YAOC_UPDATER_PUBLIC_KEY = (Get-Content -Raw "$yaocSigningDir\yaoc-tauri-updater.key.pub").Trim()
+$env:TAURI_SIGNING_PRIVATE_KEY = "$yaocSigningDir\yaoc-tauri-updater.key"
+$yaocKeyPassword = Read-Host "Tauri updater key password" -AsSecureString
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = [System.Net.NetworkCredential]::new('', $yaocKeyPassword).Password
+```
 
-`npm.cmd run updates:keygen -- --out <absolute-directory-outside-repository>` generates encrypted Ed25519 PKCS8 PEM and public JSON with a hidden, confirmed passphrase. It refuses existing identities and repository destinations. This command is retained for development/recovery and is not needed again for YAOC's existing identity.
+The password is supplied to the signing tool through this process's environment; the hidden prompt avoids putting it in command history. Do not print or share the password/private key. With the environment configured, the explicitly requested official build sequence is:
+
+```powershell
+npm.cmd run release:package
+```
+
+The release:package command checks the signing environment, adds the Cargo and LLVM-MinGW tools to its child PATH, and runs check, release, notices and package:installers in order. It stops on the first failure, builds both architectures, and uses the current base version (2026.1.0 at present). It does not tag or publish anything. Keep the signing variables loaded until it finishes.
+
+After signing, clear the password from the shell environment:
+
+```powershell
+Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+Remove-Variable yaocKeyPassword
+```
+
+YAOC does not use Windows Authenticode signing. The owner has chosen not to obtain a certificate or signing service. Application executables and installers have no Windows publisher signature; Windows may display an unknown publisher or SmartScreen warning. This does not prevent distribution or Tauri updater signature verification. Official packaging requires only the Tauri updater public/private key configuration, not a certificate.
+
+The custom NSIS template captures the exact bundle-type-patched application payload before Tauri restores its input. Packaging promotes that payload to the target executable and portable outputs, then hashes it. A verified pristine backup allows repeat packaging. Tauri generates detached updater signatures for the completed installers.
+
+package:installers generates installer-update.json for official builds from the two installer .sig files. Publish both executables, both installers, both .sig files, installer-update.json, SHA256SUMS.txt, LICENSE and THIRD_PARTY_LICENSES.txt together as an immutable non-prerelease GitHub release tagged v<version>. Never publish Beta artifacts as official updates. No Tauri private signing identity is supplied by this repository.
+
+## Native acceptance checks
+
+Validate on x64 and ARM64 Windows: install, update, confirmed restart, missing runtime, notifications, hotkeys and second-launch focusing. Check absent/corrupt/stale/copied metadata; switch between installed and portable launches and confirm profiles and localStorage are shared. Test a Unicode/spaced installation path. Verify uninstall (interactive and silent) and upgrades retain sentinel files in both data directories and unrelated files in the installation directory. After uninstall, portable YAOC must still open the same profile. Verify portable checks show only manual-download actions and backend install/download calls fail. Test locked installed files and failed installer downloads/signatures without changing portable copies. Native GUI and signed-release testing requires an interactive Windows host and signing credentials.
