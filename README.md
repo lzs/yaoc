@@ -4,7 +4,7 @@
 
 YAOC is a small, lightweight, self-contained desktop client designed to have very little impact on system resources and battery life. It requires Windows 11 (x64 or ARM64). YAOC is not an official OpenClaw application.
 
-![YAOC Screenshot](docs/assets/screenshot.png)
+![YAOC with integrated window controls, chat and workspace](docs/assets/screenshot.png)
 
 ## Features
 
