@@ -7,6 +7,7 @@ interface AgentSwitcherProps {
   agents: AgentInfo[];
   selectedAgentId: string;
   disabled?: boolean;
+  variant?: 'agent' | 'gateway';
   onSelectAgent: (agentId: string) => void;
 }
 
@@ -14,8 +15,11 @@ export default function AgentSwitcher({
   agents,
   selectedAgentId,
   disabled = false,
+  variant = 'agent',
   onSelectAgent,
 }: AgentSwitcherProps) {
+  const label = variant === 'gateway' ? 'Active Gateway profile' : 'Active Agent';
+  const popupId = variant + '-selector-popup';
   const [isOpen, setIsOpen] = useState(false);
   const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({});
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -23,7 +27,7 @@ export default function AgentSwitcher({
 
   const currentAgent = agents.find((a) => a.id === selectedAgentId);
   const currentLabel = currentAgent
-    ? currentAgent.name && currentAgent.name !== currentAgent.id
+    ? variant === 'agent' && currentAgent.name && currentAgent.name !== currentAgent.id
       ? `${currentAgent.name} (${currentAgent.id})`
       : currentAgent.name || currentAgent.id
     : selectedAgentId || 'main';
@@ -116,17 +120,17 @@ export default function AgentSwitcher({
   const isDisabled = disabled || agents.length === 0;
 
   return (
-    <div className="agent-switcher-container">
+    <div className={`agent-switcher-container ${variant}-switcher`}>
       <button
         type="button"
         ref={buttonRef}
-        id="active-agent-selector"
+        id={`active-${variant}-selector`}
         className="agent-selector"
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        aria-controls={isOpen ? 'agent-selector-popup' : undefined}
-        aria-label="Active Agent"
-        title={`Active Agent: ${currentLabel}`}
+        aria-controls={isOpen ? popupId : undefined}
+        aria-label={label}
+        title={`${label}: ${currentLabel}`}
         disabled={isDisabled}
         onClick={() => {
           if (!isDisabled) {
@@ -151,16 +155,16 @@ export default function AgentSwitcher({
         createPortal(
           <div
             ref={popupRef}
-            id="agent-selector-popup"
+            id={popupId}
             className="session-selector-popup model-popup agent-popup"
             style={popupStyle}
             role="dialog"
-            aria-label="Select Agent"
+            aria-label={variant === 'gateway' ? 'Select Gateway profile' : 'Select Agent'}
           >
             <div
               className="model-popup-list"
               role="listbox"
-              aria-label="Available agents"
+              aria-label={variant === 'gateway' ? 'Available Gateway profiles' : 'Available agents'}
               onKeyDown={(e) => {
                 const options = Array.from(
                   popupRef.current?.querySelectorAll<HTMLButtonElement>(
@@ -181,6 +185,7 @@ export default function AgentSwitcher({
               {agents.map((a) => {
                 const isSelected = a.id === selectedAgentId;
                 const hasCustomName = Boolean(a.name && a.name !== a.id);
+                const showId = variant === 'agent';
                 return (
                   <button
                     type="button"
@@ -189,7 +194,7 @@ export default function AgentSwitcher({
                     role="option"
                     aria-selected={isSelected}
                     className="model-popup-option agent-popup-option"
-                    title={a.name ? `${a.name} (${a.id})` : a.id}
+                    title={showId && a.name ? `${a.name} (${a.id})` : a.name || a.id}
                     onClick={() => {
                       closePopup(true);
                       if (a.id !== selectedAgentId) {
@@ -201,7 +206,7 @@ export default function AgentSwitcher({
                       {hasCustomName ? (
                         <>
                           <span className="agent-popup-name">{a.name}</span>
-                          <span className="agent-popup-id">({a.id})</span>
+                          {showId && <span className="agent-popup-id">({a.id})</span>}
                         </>
                       ) : (
                         <span className="agent-popup-name">{a.id}</span>
@@ -211,7 +216,13 @@ export default function AgentSwitcher({
                   </button>
                 );
               })}
-              {agents.length === 0 && <p className="model-popup-empty">No agents available.</p>}
+              {agents.length === 0 && (
+                <p className="model-popup-empty">
+                  {variant === 'gateway'
+                    ? 'No Gateway profiles available.'
+                    : 'No agents available.'}
+                </p>
+              )}
             </div>
           </div>,
           document.body

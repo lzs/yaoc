@@ -57,7 +57,7 @@ yaoc/
 │   ├── main.tsx                  # Entry point; mounts <App />
 │   ├── types.ts                  # Shared TypeScript interfaces & window.openclawApi contract
 │   ├── models.ts                 # Model list normalization, session key scoping, & sessions.patch helper
-│   ├── AgentSwitcher.tsx         # Custom accessible portal dropdown for switching active Gateway agents
+│   ├── AgentSwitcher.tsx         # Shared accessible portal dropdown for Gateway profiles and agents
 │   ├── SessionModelSwitcher.tsx  # Per-session LLM model & reasoning effort (thinkingLevel) selector
 │   ├── theme.ts                  # Dark / Light / System theme persistence & OS media query sync
 │   ├── App.tsx                   # Tauri IPC bridge init, application state, RPC orchestration, and UI views
@@ -431,7 +431,7 @@ Workspace save completion checks the file-load generation, filename, and latest 
 
 `TitleBar.tsx` reuses the 52px application header and its 24px logo as window chrome. Non-macOS windows disable native decorations before restoring geometry and becoming visible. Empty header areas initiate native window dragging; a double-click requests maximize/restore, while interactive controls are excluded. Dedicated minimize, maximize/restore, and close buttons use an allowlisted Rust `window_action` command through the frozen bridge. Closing still goes through the existing CloseRequested handler and tray policy. Resize/focus events publish maximized state to keep the restore icon synchronized, including changes made through the OS.
 
-On macOS the native decorations remain enabled with an overlay title bar and an empty native title; the shared header reserves left-hand space for the native traffic lights and omits the replacement window buttons. Other platform-specific YAOC features still need separate macOS porting and native validation. The header selector can shrink at the minimum supported window width without shrinking the logo or action controls.
+On macOS the native decorations remain enabled with an overlay title bar and an empty native title; the shared header reserves left-hand space for the native traffic lights and omits the replacement window buttons. Other platform-specific YAOC features still need separate macOS porting and native validation. The Gateway profile selector reuses the agent selector's styled trigger, portal popup, selected checkmark, and keyboard navigation. The header selector can shrink at the minimum supported window width without shrinking the logo or action controls.
 
 ### Chat action feedback
 

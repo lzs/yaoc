@@ -3061,7 +3061,7 @@ textarea {
   margin-left: auto;
   min-width: 0;
 }
-.integrated-titlebar .connection-bar > .select-field {
+.integrated-titlebar .connection-bar > .gateway-switcher {
   width: 260px;
   min-width: 120px;
   flex: 0 1 260px;

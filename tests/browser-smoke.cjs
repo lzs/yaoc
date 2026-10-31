@@ -421,8 +421,20 @@ async function openApp(browser, options = {}) {
       ]);
       const count = await page.evaluate(() => window.testWindowActions.length);
       await page
-        .getByRole('combobox', { name: 'Active Gateway profile' })
+        .getByRole('button', { name: 'Active Gateway profile', exact: true })
         .dispatchEvent('mousedown', { button: 0, detail: 1 });
+      const gatewaySelector = page.getByRole('button', {
+        name: 'Active Gateway profile',
+        exact: true,
+      });
+      await gatewaySelector.focus();
+      await page.keyboard.press('ArrowDown');
+      const gatewayPopup = page.getByRole('dialog', { name: 'Select Gateway profile' });
+      await gatewayPopup.waitFor();
+      assert.equal(await gatewayPopup.getByRole('option', { selected: true }).count(), 1);
+      await page.keyboard.press('Escape');
+      assert.equal(await gatewaySelector.getAttribute('aria-expanded'), 'false');
+      assert.equal(await gatewaySelector.evaluate((el) => document.activeElement === el), true);
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await page.getByRole('dialog', { name: 'Settings' }).waitFor();
       assert.equal(await page.evaluate(() => window.testWindowActions.length), count);
@@ -430,7 +442,9 @@ async function openApp(browser, options = {}) {
       for (const width of [1360, 960]) {
         await page.setViewportSize({ width, height: 860 });
         assert.equal(await header.evaluate((el) => el.scrollWidth > el.clientWidth), false);
-        const select = await header.getByRole('combobox').boundingBox();
+        const select = await header
+          .getByRole('button', { name: 'Active Gateway profile', exact: true })
+          .boundingBox();
         assert.ok(select.width >= 120);
         await header.screenshot({
           path: path.join(root, '.local', `titlebar-${theme}-${width}.png`),

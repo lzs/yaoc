@@ -3159,21 +3159,15 @@ export default function App() {
         </div>
 
         <div className="connection-bar">
-          <select
-            className="select-field"
-            aria-label="Active Gateway profile"
-            value={activeProfileId}
-            onChange={(e) => {
-              const nextId = e.target.value;
-              setActiveProfileId(nextId);
-            }}
-          >
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.endpoint})
-              </option>
-            ))}
-          </select>
+          <AgentSwitcher
+            variant="gateway"
+            agents={profiles.map((profile) => ({
+              id: profile.id,
+              name: `${profile.name} (${profile.endpoint})`,
+            }))}
+            selectedAgentId={activeProfileId}
+            onSelectAgent={setActiveProfileId}
+          />
 
           <button
             className={`btn ${showWorkspacePane ? 'btn-primary' : ''}`}
