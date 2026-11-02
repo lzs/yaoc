@@ -58,8 +58,8 @@ jobs:
         with:
           name: yaoc-windows-beta
           path: |
-            release/yaoc-x64.exe
-            release/yaoc-arm64.exe
+            release/yaoc-x64-portable.zip
+            release/yaoc-arm64-portable.zip
             release/yaoc-x64-setup.exe
             release/yaoc-arm64-setup.exe
             release/SHA256SUMS.txt

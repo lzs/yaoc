@@ -74,6 +74,10 @@ async function openApp(browser, options = {}) {
                   ]),
             thinkingDefault: model === 'provider/model-12' ? 'low' : 'adaptive',
           };
+    window.testConnectCalls = [];
+    window.testEmitStatus = (status) => {
+      for (const callback of callbacks) callback(status);
+    };
     window.testRequests = [];
     window.testSaves = [];
     window.testHotkeys = [];
@@ -126,7 +130,7 @@ async function openApp(browser, options = {}) {
           profiles: [{ id: 'test', name: 'Test Gateway', endpoint: 'mock://demo' }],
           activeProfileId: 'test',
           uiState: {
-            autoConnect: true,
+            autoConnect: options.autoConnect ?? true,
             showWorkspacePane: false,
             ...(options.hotkey === undefined ? {} : { globalHotkey: options.hotkey }),
           },
@@ -145,7 +149,17 @@ async function openApp(browser, options = {}) {
         gatewayCallbacks.add(callback);
         return () => gatewayCallbacks.delete(callback);
       },
-      connect: async () => {
+      connect: async (profile) => {
+        window.testConnectCalls.push(profile);
+        if (window.testConnectMode === 'pending') {
+          await new Promise((resolve) => {
+            window.testResolveConnect = resolve;
+          });
+        }
+        if (window.testConnectMode === 'error') {
+          window.testEmitStatus({ state: 'error', message: 'Gateway unavailable' });
+          throw new Error('Gateway unavailable');
+        }
         for (const callback of callbacks) callback({ state: 'connected', endpoint: 'mock://demo' });
         return { ok: true };
       },
@@ -537,6 +551,44 @@ async function openApp(browser, options = {}) {
         .locator('.message-card.system.error')
         .filter({ hasText: 'Could not reset session:' })
         .waitFor();
+      await page.close();
+    }
+    {
+      const page = await openApp(browser, { autoConnect: false });
+      await page.getByRole('textbox', { name: 'Message Assistant', exact: true }).waitFor();
+      await page.waitForFunction(() => window.testSaves.length > 0);
+      await page.evaluate(() => {
+        window.testConnectMode = 'pending';
+        window.dispatchEvent(new Event('focus'));
+        window.dispatchEvent(new Event('focus'));
+      });
+      assert.equal(await page.evaluate(() => window.testConnectCalls.length), 1);
+      assert.equal(await page.evaluate(() => window.testConnectCalls[0].id), 'test');
+      await page.evaluate(() => window.testResolveConnect());
+      await page.waitForFunction(() => document.querySelector('.status-dot.connected'));
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      assert.equal(await page.evaluate(() => window.testConnectCalls.length), 1);
+      for (const state of ['connecting', 'pairing']) {
+        await page.evaluate((state) => {
+          window.testEmitStatus({ state });
+          window.dispatchEvent(new Event('focus'));
+        }, state);
+        assert.equal(await page.evaluate(() => window.testConnectCalls.length), 1);
+      }
+      await page.evaluate(() => {
+        window.testEmitStatus({ state: 'disconnected' });
+        window.testConnectMode = 'error';
+        window.dispatchEvent(new Event('focus'));
+      });
+      await page.waitForFunction(() => document.querySelector('.status-dot.error'));
+      await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(() => window.testConnectCalls.length), 2);
+      await page.evaluate(() => {
+        window.testConnectMode = 'success';
+        window.dispatchEvent(new Event('focus'));
+      });
+      await page.waitForFunction(() => document.querySelector('.status-dot.connected'));
+      assert.equal(await page.evaluate(() => window.testConnectCalls.length), 3);
       await page.close();
     }
     {

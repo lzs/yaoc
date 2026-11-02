@@ -33,6 +33,18 @@ x86_64-w64-mingw32-clang --version
 aarch64-w64-mingw32-clang --version
 ```
 
+## Local builds from a network source checkout
+
+Keep the source checkout, documents, and agent instructions on the network drive. Run the build in `%USERPROFILE%\Documents\ChatGPT\yaoc` on the local disk:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1
+```
+
+The script copies source inputs, installs dependencies locally, runs checks and browser tests, builds both Beta architectures, and packages both installers and portable executables. Its local `release/` directory retains the three rolling backup generations. Network `node_modules/`, `dist/`, `src-tauri/target/`, and `release/` directories are excluded from the copy. Only version manifests, lockfiles, and generated license notices are copied back to the source checkout, and concurrent source edits are preserved with a warning. Existing network build outputs can be retired separately.
+
+The local folder is a build workspace; edit source in the network checkout and rerun the script to refresh it. Source mirroring removes stale source files locally while preserving the excluded dependency, build, and release directories. `run-app.bat` launches the local portable executable and runs this workflow if the executable is missing. The commands below should be run in the local build workspace.
+
 ## Checks
 
 Run from the repository root:
@@ -81,7 +93,7 @@ Official releases use `major.minor.patch`, such as `2026.1.0`. Normal builds use
 
 The Vite build generates one timestamp for both architectures. After emitting the frontend, `scripts/sync-version.cjs` stamps the same full version into `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` before Cargo runs. These files retain the most recent build version, so the UI, native Gateway identification, and Tauri metadata match. Subsequent builds replace the suffix; official builds remove it. Builds therefore update tracked version metadata. To bump the base version, update the matching manifests and lockfiles together; `npm.cmd run check` verifies consistency.
 
-Raw executables are `src-tauri/target/<target-triple>/release/yaoc.exe`. Packaging writes `release/yaoc-x64.exe`, `release/yaoc-arm64.exe`, and `SHA256SUMS.txt`, with three rolling `.0.exe`/`.1.exe`/`.2.exe` backups in `release/archive/`. A still-running oldest image is moved to `release/archive/.in-use` until a later packaging run can remove it. `package:installers` also writes `yaoc-x64-setup.exe` and `yaoc-arm64-setup.exe`; it captures the patched/signed NSIS payload so the portable executable matches byte-for-byte. See [UPDATES.md](UPDATES.md) for signing configuration and native acceptance commands. Distribute the project license and `THIRD_PARTY_LICENSES.txt` with the executables. The checked-in source tree excludes binaries and local build output.
+Raw executables are `src-tauri/target/<target-triple>/release/yaoc.exe`. Packaging writes `release/yaoc-x64.exe`, `release/yaoc-arm64.exe`, and `SHA256SUMS.txt`, with three rolling `.0.exe`/`.1.exe`/`.2.exe` backups in `release/archive/`. A still-running oldest image is moved to `release/archive/.in-use` until a later packaging run can remove it. `package:installers` also writes `yaoc-x64-setup.exe` and `yaoc-arm64-setup.exe`; it captures the patched/signed NSIS payload so the portable executable matches byte-for-byte. See [UPDATES.md](UPDATES.md) for signing configuration and native acceptance commands. Portable downloads are `yaoc-x64-portable.zip` and `yaoc-arm64-portable.zip`, each containing the matching executable, `LICENSE`, and `THIRD_PARTY_LICENSES.txt` at the archive root. Packaging creates these ZIPs automatically and includes their hashes alongside the loose executable hashes in `SHA256SUMS.txt`. Publish the ZIPs as the portable downloads; keep the loose executables and rolling backups locally. The checked-in source tree excludes binaries and local build output.
 
 The root `.cargo/config.toml` supplies both LLVM-MinGW linkers and `-C target-feature=+crt-static`. This avoids a separate `libunwind.dll`. The patched `webview2-com-sys` crate embeds the architecture-specific WebView2 loader. Windows system DLLs and the installed WebView2 Runtime remain runtime dependencies. Do not remove the patch or change `dragDropEnabled: false` without testing attachment drag-and-drop.
 

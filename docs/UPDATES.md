@@ -12,7 +12,7 @@ Both modes check official releases using https://github.com/lzs/yaoc/releases/la
 
 Installed mode uses tauri-plugin-updater, pinned in Cargo, to download/verify the architecture-specific NSIS installer. The download URL must belong to the exact versioned lzs/yaoc release. Installation verifies the bytes again and passes the running installation directory to NSIS. Existing drafts, attachments, active responses and unsaved/saving files block the confirmed install/restart action. Tauri saves window state before exiting, and NSIS waits for the exact installed executable to become writable before modifying it. No process-name-wide termination is used. Installation errors are reported; there is no automatic startup-crash rollback. Re-run a trusted installer if recovery is needed.
 
-Portable mode only reports the newer version and opens the official release page. Quit YAOC including the tray icon, download the matching x64/ARM64 executable and replace the old file. Shared settings remain intact. Backend commands reject download and install in portable mode. There is no portable self-replacement implementation, custom signed manifest or predecessor-wait protocol.
+Portable mode only reports the newer version and opens the official release page. Quit YAOC including the tray icon, download and extract the matching x64/ARM64 portable ZIP and replace the old executable with the extracted file. Shared settings remain intact. Backend commands reject download and install in portable mode. There is no portable self-replacement implementation, custom signed manifest or predecessor-wait protocol.
 
 ## Windows integration and uninstall
 
@@ -32,17 +32,16 @@ npm.cmd run notices
 npm.cmd run package:installers
 ```
 
-The packaging command bundles existing executables for both targets and then invokes package:portable, preserving three rolling backup generations in release/archive/. If Windows still holds the oldest image open, it is moved to release/archive/.in-use so the active session can continue; a later packaging run removes it after it exits. Outputs are release/yaoc-x64.exe, yaoc-arm64.exe, yaoc-x64-setup.exe and yaoc-arm64-setup.exe, plus notices and portable SHA256SUMS.txt. Embedded WebView2Loader.dll is retained; portable copies still require the WebView2 runtime. NSIS can bootstrap the runtime.
+The packaging command bundles existing executables for both targets and then invokes package:portable, preserving three rolling backup generations in release/archive/. If Windows still holds the oldest image open, it is moved to release/archive/.in-use so the active session can continue; a later packaging run removes it after it exits. Outputs are release/yaoc-x64.exe, yaoc-arm64.exe, yaoc-x64-setup.exe and yaoc-arm64-setup.exe, plus yaoc-x64-portable.zip and yaoc-arm64-portable.zip (each containing the matching EXE, LICENSE and THIRD_PARTY_LICENSES.txt), notices and SHA256SUMS.txt covering the loose EXEs and ZIPs. Embedded WebView2Loader.dll is retained; portable copies still require the WebView2 runtime. NSIS can bootstrap the runtime.
 
 Beta packaging can be unsigned for local testing. It does not publish official update metadata. If no updater public key was compiled into a Beta, installed update checks explain that installation is unconfigured and direct the user to manual downloads.
 
-Official builds must be requested explicitly. The former npm run updates:keygen command created a PKCS8 identity for the removed custom portable updater. It is not the Tauri signing format. Generate a separate Tauri key pair once, keeping the existing signing directory and leaving the old files untouched. The owner's directory is spelled yaoc-singing as shown below.
+Official builds must be requested explicitly. The former npm run updates:keygen command created a PKCS8 identity for the removed custom portable updater. It is not the Tauri signing format. Generate a separate Tauri key pair once, keeping the existing signing directory and leaving the old files untouched.
 
-Run locally (not through chat), and choose a password when prompted:
+Run locally from the repository root. Use an existing secure signing directory outside the repository, and choose a password when prompted:
 
 ```powershell
-Set-Location "$env:USERPROFILE\Nextcloud\CloudDocs\AppProjects\yaoc"
-$yaocSigningDir = "$env:USERPROFILE\Nextcloud\CloudDocs\Sync\npm-signing\yaoc-singing"
+$yaocSigningDir = Read-Host "Existing secure signing directory (outside the repository)"
 npm.cmd exec -- tauri signer generate -w "$yaocSigningDir\yaoc-tauri-updater.key"
 ```
 
@@ -51,7 +50,7 @@ Do not use --force or overwrite an existing key. Keep the resulting yaoc-tauri-u
 Before each official build, configure the same PowerShell session:
 
 ```powershell
-$yaocSigningDir = "$env:USERPROFILE\Nextcloud\CloudDocs\Sync\npm-signing\yaoc-singing"
+$yaocSigningDir = Read-Host "Existing secure signing directory (outside the repository)"
 $env:YAOC_UPDATER_PUBLIC_KEY = (Get-Content -Raw "$yaocSigningDir\yaoc-tauri-updater.key.pub").Trim()
 $env:TAURI_SIGNING_PRIVATE_KEY = "$yaocSigningDir\yaoc-tauri-updater.key"
 $yaocKeyPassword = Read-Host "Tauri updater key password" -AsSecureString
@@ -77,7 +76,7 @@ YAOC does not use Windows Authenticode signing. The owner has chosen not to obta
 
 The custom NSIS template captures the exact bundle-type-patched application payload before Tauri restores its input. Packaging promotes that payload to the target executable and portable outputs, then hashes it. A verified pristine backup allows repeat packaging. Tauri generates detached updater signatures for the completed installers.
 
-package:installers generates installer-update.json for official builds from the two installer .sig files. Publish both executables, both installers, both .sig files, installer-update.json, SHA256SUMS.txt, LICENSE and THIRD_PARTY_LICENSES.txt together as an immutable non-prerelease GitHub release tagged v<version>. Never publish Beta artifacts as official updates. No Tauri private signing identity is supplied by this repository.
+package:installers generates installer-update.json for official builds from the two installer .sig files. Publish both portable ZIPs, both installers, both .sig files, installer-update.json, SHA256SUMS.txt, LICENSE and THIRD_PARTY_LICENSES.txt together as an immutable non-prerelease GitHub release tagged v<version>. Never publish Beta artifacts as official updates. No Tauri private signing identity is supplied by this repository.
 
 ## Native acceptance checks
 

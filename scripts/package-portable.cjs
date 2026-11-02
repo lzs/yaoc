@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const cp = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const release = path.join(root, 'release');
 const archive = path.join(release, 'archive');
@@ -71,11 +72,55 @@ try {
   for (const name of ['LICENSE', 'THIRD_PARTY_LICENSES.txt']) {
     fs.copyFileSync(path.join(root, name), path.join(release, name));
   }
+  const artifacts = [];
+  for (const { arch } of sources) {
+    const executable = `yaoc-${arch}.exe`;
+    const zip = `yaoc-${arch}-portable.zip`;
+    const stagedZip = path.join(release, `yaoc-${arch}-portable.${process.pid}.tmp.zip`);
+    try {
+      const result = cp.spawnSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `
+            $ErrorActionPreference = 'Stop'
+            Add-Type -AssemblyName System.IO.Compression
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [IO.Compression.ZipFile]::Open($env:YAOC_PORTABLE_ZIP, [IO.Compression.ZipArchiveMode]::Create)
+            try {
+              foreach ($file in @($env:YAOC_PORTABLE_EXE, $env:YAOC_PORTABLE_LICENSE, $env:YAOC_PORTABLE_NOTICES)) {
+                [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file, [IO.Path]::GetFileName($file), [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+              }
+            } finally {
+              $zip.Dispose()
+            }
+          `,
+        ],
+        {
+          stdio: 'inherit',
+          env: {
+            ...process.env,
+            YAOC_PORTABLE_EXE: path.join(release, executable),
+            YAOC_PORTABLE_LICENSE: path.join(release, 'LICENSE'),
+            YAOC_PORTABLE_NOTICES: path.join(release, 'THIRD_PARTY_LICENSES.txt'),
+            YAOC_PORTABLE_ZIP: stagedZip,
+          },
+        }
+      );
+      if (result.error) throw result.error;
+      if (result.status !== 0) throw new Error(`ZIP packaging failed for ${arch}`);
+      fs.renameSync(stagedZip, path.join(release, zip));
+      artifacts.push(executable, zip);
+      console.log(`Packaged ${zip}`);
+    } finally {
+      fs.rmSync(stagedZip, { force: true });
+    }
+  }
   fs.writeFileSync(
     path.join(release, 'SHA256SUMS.txt'),
-    sources
-      .map(({ arch }) => `${hash(path.join(release, `yaoc-${arch}.exe`))}  yaoc-${arch}.exe`)
-      .join('\n') + '\n'
+    artifacts.map((name) => `${hash(path.join(release, name))}  ${name}`).join('\n') + '\n'
   );
 } catch (error) {
   console.error(`Packaging failed: ${error.message}`);

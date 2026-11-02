@@ -119,7 +119,7 @@ test('AgentSwitcher displays formatted labels correctly', () => {
     onSelectAgent() {},
   });
   assert.equal(tree.type, 'div');
-  assert.equal(tree.props.className, 'agent-switcher-container');
+  assert.equal(tree.props.className, 'agent-switcher-container agent-switcher');
   const button = tree.props.children[0];
   assert.equal(button.type, 'button');
   assert.equal(button.props.className, 'agent-selector');

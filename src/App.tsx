@@ -901,6 +901,8 @@ export default function App() {
   const selectedAgentIdRef = useRef(selectedAgentId);
   selectedAgentIdRef.current = selectedAgentId;
   const connectionGenerationRef = useRef(0);
+  const connectionStatusRef = useRef<ConnectionStatus>({ state: 'disconnected' });
+  const pendingConnectionAttemptsRef = useRef(0);
   const sessionListSeqRef = useRef(0);
   const workspaceListSeqRef = useRef(0);
   const workspaceSaveSeqRef = useRef(0);
@@ -1086,11 +1088,28 @@ export default function App() {
     }, 1800);
   }
 
+  // Each window focus gets one attempt; status changes alone never trigger retries.
+  useEffect(() => {
+    const reconnectOnFocus = () => {
+      const state = connectionStatusRef.current.state;
+      if (
+        !profilesLoaded ||
+        !activeProfile ||
+        pendingConnectionAttemptsRef.current > 0 ||
+        (state !== 'disconnected' && state !== 'error')
+      )
+        return;
+      connectGateway(activeProfile).catch(() => {});
+    };
+    window.addEventListener('focus', reconnectOnFocus);
+    return () => window.removeEventListener('focus', reconnectOnFocus);
+  }, [profilesLoaded, activeProfile]);
+
   // Auto-poll when in 'pairing' state (just like OpenClaw Web Control UI!)
   useEffect(() => {
     if (connStatus.state !== 'pairing' || !autoPollPairing || !activeProfile) return;
     const timer = setInterval(() => {
-      window.openclawApi?.connect(activeProfile).catch(() => {});
+      connectGateway(activeProfile).catch(() => {});
     }, 4500);
     return () => clearInterval(timer);
   }, [connStatus.state, autoPollPairing, activeProfile]);
@@ -1145,6 +1164,7 @@ export default function App() {
 
     const unsubStatus = api.onStatus((status) => {
       ++connectionGenerationRef.current;
+      connectionStatusRef.current = status;
       setConnStatus(status);
       if (status.state !== 'connected') {
         for (const timer of streamingTimeoutsRef.current.values()) clearTimeout(timer);
@@ -1306,7 +1326,7 @@ export default function App() {
         setProfilesLoaded(true);
 
         if (mergedUi.autoConnect && targetProfile) {
-          api.connect(targetProfile).catch(() => {});
+          connectGateway(targetProfile).catch(() => {});
         }
       })
       .catch((error: unknown) => {
@@ -2330,13 +2350,24 @@ export default function App() {
     setShowNewFileInput(false);
   }
 
+  async function connectGateway(profile: GatewayProfile) {
+    const api = window.openclawApi;
+    if (!api) return;
+    ++connectionGenerationRef.current;
+    ++pendingConnectionAttemptsRef.current;
+    try {
+      await api.connect(profile);
+    } finally {
+      --pendingConnectionAttemptsRef.current;
+    }
+  }
+
   async function handleConnect(profileToUse?: GatewayProfile) {
     const api = window.openclawApi;
     const target = profileToUse || activeProfile;
     if (!api || !target) return;
-    ++connectionGenerationRef.current;
     setAutoConnect(true);
-    await api.connect(target);
+    await connectGateway(target);
   }
 
   async function handleDisconnect() {

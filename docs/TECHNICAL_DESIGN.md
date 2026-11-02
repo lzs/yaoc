@@ -169,6 +169,8 @@ yaoc/
    - `send_rpc` generates `req-{counter}-{timestamp_ms}`, stores a `oneshot::Sender` in `pending`, and awaits the matching `"type": "res"` frame with a configurable timeout (`timeoutMs`, default 30,000 ms; 12,000 ms for `connect`).
    - All non-challenge `"type": "event"` frames are emitted to the frontend via `app.emit("gateway:event", frame)`.
 
+YAOC checks its latest Gateway connection status on each window `focus` event after profiles have loaded. If disconnected or in an error state, it makes one connection attempt using the active profile, including when startup auto-connect is disabled. Connected, connecting, and pairing states are left alone. A shared in-flight counter covers startup, manual, pairing, and focus connection attempts so focus does not queue a duplicate before a status event arrives. A failed focus attempt waits for another focus event; it does not start a retry loop.
+
 ### 3.3 Tauri IPC Commands & Events
 
 | Tauri Command             | Arguments                                   | Return Type                               | Description                                                                                                                                                                          |
@@ -398,7 +400,7 @@ Connection epochs identify the active transport. Each connection owns its reader
 
 The production CSP allows bundled scripts and the Tauri IPC endpoint, with inline styles for React and local `data:`/`blob:` image previews (`img-src 'self' data: blob:`). The development policy separately allows Vite's local HMR connection. This complements React's escaped Markdown rendering; it does not make an untrusted Gateway safe.
 
-Public build/test commands live in `package.json`. `scripts/package-portable.cjs` stages both lowercase binaries, rotates three backups, and writes SHA-256 checksums. `scripts/third-party-notices.cjs` gathers installed package notices. GitHub CI verifies the source and builds both Windows targets. See `SECURITY.md`, `CONTRIBUTING.md`, and `docs/BUILD.md` for operational guidance and remaining runtime validation requirements.
+Public build/test commands live in `package.json`. `scripts/package-portable.cjs` stages both lowercase binaries, rotates three EXE backups, and creates `yaoc-x64-portable.zip` and `yaoc-arm64-portable.zip` with the matching EXE and both license notices at the archive root. SHA-256 checksums cover both loose executables and ZIPs. CI and release publishing use the ZIPs for portable downloads. `scripts/third-party-notices.cjs` gathers installed package notices. GitHub CI verifies the source and builds both Windows targets. See `SECURITY.md`, `CONTRIBUTING.md`, and `docs/BUILD.md` for operational guidance and remaining runtime validation requirements.
 
 ### Project licensing and settings persistence
 
