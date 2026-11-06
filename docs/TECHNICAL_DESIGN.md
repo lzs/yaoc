@@ -460,3 +460,7 @@ The same application binary ships inside a per-user NSIS installer and as a stan
 Only installed mode downloads/installs updates through tauri-plugin-updater with mandatory installer signatures. Portable mode reports official releases and opens the manual download page. The old portable replacement and signing protocol are removed. The renderer blocks installer restart while work is unsaved or active.
 
 The pinned custom NSIS template preserves all shared data and unrelated files, removes the data-deletion UI, and checks executable locks by installation path. Installer hooks create metadata and own installed toast registration; portable mode uses registry-only native WinRT toast registration under its own identity, with no shortcut writes. See [UPDATES.md](UPDATES.md) for packaging, signing, recovery limits and native validation.
+
+### Device approval guidance
+
+Gateway profile setup and connection troubleshooting include device approval instructions before a pairing error. Native handshake rejection handling preserves the structured error before an immediate server close can invalidate the connection epoch; top-level and details pairing codes are recognized. Close-only pairing-required responses also enter the pairing guide. Approvals are performed on the Gateway host or in Devices in an already connected OpenClaw Control UI.

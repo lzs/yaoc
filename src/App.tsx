@@ -3732,7 +3732,7 @@ export default function App() {
                   <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                     If you already have the OpenClaw Control UI open in your browser at{' '}
                     <code>{activeProfile?.endpoint}</code>, you can also approve this device under{' '}
-                    <strong>Nodes / Devices</strong> by matching this Device ID:
+                    <strong>Devices</strong> by matching this Device ID:
                   </p>
                   {(() => {
                     const safeDeviceId =
@@ -3906,6 +3906,16 @@ export default function App() {
                       passwords, and conversation data. Only use on trusted private networks.
                     </div>
                   )}
+                </div>
+
+                <div className="guide-step">
+                  <div className="guide-step-title">Setting up a new device?</div>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    After Gateway authentication succeeds, OpenClaw may require device approval. On
+                    the Gateway server, run <code>openclaw devices list</code> and approve the
+                    matching request with <code>openclaw devices approve &lt;requestId&gt;</code>,
+                    or use Devices in an already connected OpenClaw Control UI. Then retry here.
+                  </p>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
@@ -5262,6 +5272,33 @@ export default function App() {
                             Gateway credentials and messages in cleartext over the network. Use{' '}
                             <code>wss://</code> or <code>https://</code> for remote hosts.
                           </div>
+                        )}
+                      </div>
+
+                      <div className="guide-step" aria-label="Device approval help">
+                        <div className="guide-step-title">Approve a new device in OpenClaw</div>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                          Connect once to create a pending device request. On the Gateway server,
+                          run <code>openclaw devices list</code>, match this Windows client&apos;s
+                          Device ID, then run{' '}
+                          <code>openclaw devices approve &lt;requestId&gt;</code>. You can also
+                          approve it in Devices in an already connected OpenClaw Control UI. Return
+                          to YAOC and connect again after approval. Gateway credentials may still be
+                          required before a pairing request can be created.
+                        </p>
+                        <div className="cmd-row">
+                          <code style={{ wordBreak: 'break-all' }}>
+                            {sanitizeDeviceId(sysInfo?.deviceIdentity?.deviceId) ||
+                              'Device ID unavailable'}
+                          </code>
+                        </div>
+                        {connStatus.state === 'pairing' && (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => setShowProfileModal(false)}
+                          >
+                            Show device approval steps
+                          </button>
                         )}
                       </div>
 

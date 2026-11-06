@@ -784,6 +784,13 @@ async function openApp(browser, options = {}) {
       const activeChat = await page.locator('.session-item.active .session-key').innerText();
       // Navigate from a form control too, rather than requiring focus on a tab.
       await page.locator('#theme-select').focus();
+      await page.getByRole('tab', { name: 'Gateway Profiles', exact: true }).click();
+      await page
+        .getByLabel('Device approval help', { exact: true })
+        .getByText('Approve a new device in OpenClaw', { exact: true })
+        .waitFor();
+      await page.getByRole('tab', { name: 'General', exact: true }).click();
+      await page.locator('#theme-select').focus();
       for (const tab of ['Gateway Profiles', 'Shortcuts', 'About', 'General']) {
         await page.keyboard.press('Control+PageDown');
         assert.equal(

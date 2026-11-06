@@ -286,6 +286,25 @@ fn authentication_token(profile: &GatewayProfile) -> &str {
         .unwrap_or("")
 }
 
+fn is_pairing_error(error: &Value) -> bool {
+    let is_pairing_code = |code: &str| matches!(code, "NOT_PAIRED" | "PAIRING_REQUIRED");
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_lowercase();
+    error
+        .get("code")
+        .and_then(Value::as_str)
+        .is_some_and(is_pairing_code)
+        || error
+            .pointer("/details/code")
+            .and_then(Value::as_str)
+            .is_some_and(is_pairing_code)
+        || message.contains("pairing required")
+        || message.contains("not approved")
+}
+
 fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -379,10 +398,11 @@ impl GatewayState {
             let _ = app.emit(
                 "gateway:status",
                 json!({
-                    "state": "disconnected",
+                    "state": if is_pairing_error(&json!({ "message": message })) { "pairing" } else { "disconnected" },
                     "profileId": profile_id,
                     "endpoint": endpoint,
-                    "message": message
+                    "message": message,
+                    "deviceId": self.identity.device_id
                 }),
             );
         }
@@ -402,7 +422,8 @@ impl GatewayState {
         let tx = tx_opt.ok_or_else(|| json!({ "message": "WebSocket is not connected" }))?;
 
         let id = format!(
-            "req-{}-{}",
+            "req-{}-{}-{}",
+            method,
             self.req_counter.fetch_add(1, Ordering::SeqCst),
             now_ms()
         );
@@ -829,6 +850,12 @@ async fn gateway_connect(
                                         .cloned()
                                         .unwrap_or(json!({ "message": "RPC failed" }));
                                     let _ = sender.send(Err(err_obj));
+                                    // The connect caller owns rejection status and cleanup. A server
+                                    // may close immediately after this frame; preserve the epoch
+                                    // until the caller has displayed the structured error.
+                                    if id.starts_with("req-connect-") {
+                                        return;
+                                    }
                                 }
                             }
                         }
@@ -1015,11 +1042,7 @@ async fn gateway_connect(
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
             let details = err_val.get("details").cloned();
-            let lower = msg.to_lowercase();
-            let is_pairing = lower.contains("pairing required")
-                || lower.contains("not approved")
-                || code.as_deref() == Some("NOT_PAIRED")
-                || code.as_deref() == Some("PAIRING_REQUIRED");
+            let is_pairing = is_pairing_error(&err_val);
 
             let _ = app.emit(
                 "gateway:status",
