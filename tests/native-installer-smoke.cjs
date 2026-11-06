@@ -17,6 +17,10 @@ function run(file, args) {
     stdio: 'inherit',
     env: {
       ...process.env,
+      YAOC_ARM64_PAYLOAD: path.join(
+        root,
+        'src-tauri/target/aarch64-pc-windows-gnullvm/release/yaoc.exe.nsis-payload.exe'
+      ),
       YAOC_NODE_EXECUTABLE: process.execPath,
       YAOC_CAPTURE_SCRIPT: path.join(root, 'scripts/capture-installer-payload.cjs'),
     },
@@ -37,64 +41,89 @@ function run(file, args) {
     fs.writeFileSync(path.join(directory, 'retain.txt'), 'shared data sentinel');
   }
   const runtimeExe = path.join(root, 'src-tauri/target/x86_64-pc-windows-gnullvm/release/yaoc.exe');
+  const nativeTriple =
+    process.arch === 'arm64' ? 'aarch64-pc-windows-gnullvm' : 'x86_64-pc-windows-gnullvm';
   const preservedPayload = fs.readFileSync(runtimeExe);
   try {
-    fs.copyFileSync(runtimeExe + '.pre-bundle.exe', runtimeExe);
-    const config = { productName: name, identifier: id, bundle: { createUpdaterArtifacts: false } };
-    run(process.execPath, [
-      require.resolve('@tauri-apps/cli/tauri.js'),
-      'bundle',
-      '--target',
-      'x86_64-pc-windows-gnullvm',
-      '--bundles',
-      'nsis',
-      '--ci',
-      '--no-sign',
-      '--config',
-      JSON.stringify(config),
-    ]);
-    const installer = path.join(
-      root,
-      'src-tauri/target/x86_64-pc-windows-gnullvm/release/bundle/nsis',
-      name + '_' + version + '_x64-setup.exe'
-    );
-    run(installer, ['/S', '/NS', '/D=' + install]);
-    assert(fs.existsSync(path.join(install, 'yaoc.exe')));
-    assert.equal(
-      hash(path.join(install, 'yaoc.exe')),
-      hash(
-        path.join(
-          root,
-          'src-tauri/target/x86_64-pc-windows-gnullvm/release/yaoc.exe.nsis-payload.exe'
-        )
-      ),
-      'Installer payload differs from portable'
-    );
-    const raw = fs.readFileSync(path.join(install, 'install-metadata.json'));
-    const metadata = JSON.parse(raw.subarray(2).toString('utf16le'));
-    assert.equal(metadata.formatVersion, 1);
-    assert.equal(metadata.installDirectory, install);
-    fs.writeFileSync(path.join(install, 'unrelated.txt'), 'do not delete');
-    // Upgrade-in-place preserves all shared data and unrelated installation files.
-    run(installer, ['/S', '/NS', '/UPDATE', '/D=' + install]);
-    for (const directory of data)
-      assert.equal(
-        fs.readFileSync(path.join(directory, 'retain.txt'), 'utf8'),
-        'shared data sentinel'
+    for (const forceArm64 of [false, true]) {
+      fs.copyFileSync(runtimeExe + '.pre-bundle.exe', runtimeExe);
+      const template = path.join(testRoot, 'installer.nsi');
+      const sourceTemplate = fs.readFileSync(
+        path.join(root, 'src-tauri/windows/installer.nsi'),
+        'utf8'
       );
-    run(path.join(install, 'uninstall.exe'), ['/S']);
-    for (let i = 0; i < 200 && fs.existsSync(path.join(install, 'yaoc.exe')); i++) await sleep(100);
-    assert(!fs.existsSync(path.join(install, 'yaoc.exe')), 'Uninstall failed');
-    assert(!fs.existsSync(path.join(install, 'install-metadata.json')));
-    assert.equal(fs.readFileSync(path.join(install, 'unrelated.txt'), 'utf8'), 'do not delete');
-    for (const directory of data)
-      assert.equal(
-        fs.readFileSync(path.join(directory, 'retain.txt'), 'utf8'),
-        'shared data sentinel'
+      // This override exists only in the isolated test template, never in a release.
+      fs.writeFileSync(
+        template,
+        forceArm64
+          ? sourceTemplate.replace('${If} ${IsNativeARM64}', '${If} 1 = 1')
+          : sourceTemplate
       );
-    console.log(
-      'PASS: native NSIS metadata, identical portable/installer payload, upgrade, silent uninstall, preserved shared data and unrelated files.'
-    );
+      const config = {
+        productName: name,
+        identifier: id,
+        bundle: { createUpdaterArtifacts: false, windows: { nsis: { template } } },
+      };
+      run(process.execPath, [
+        require.resolve('@tauri-apps/cli/tauri.js'),
+        'bundle',
+        '--target',
+        'x86_64-pc-windows-gnullvm',
+        '--bundles',
+        'nsis',
+        '--ci',
+        '--no-sign',
+        '--config',
+        JSON.stringify(config),
+      ]);
+      const installer = path.join(
+        root,
+        'src-tauri/target/x86_64-pc-windows-gnullvm/release/bundle/nsis',
+        name + '_' + version + '_x64-setup.exe'
+      );
+      run(installer, ['/S', '/NS', '/D=' + install]);
+      assert(fs.existsSync(path.join(install, 'yaoc.exe')));
+      assert.equal(
+        hash(path.join(install, 'yaoc.exe')),
+        hash(
+          path.join(
+            root,
+            'src-tauri/target/' +
+              (forceArm64 ? 'aarch64-pc-windows-gnullvm' : nativeTriple) +
+              '/release/yaoc.exe.nsis-payload.exe'
+          )
+        ),
+        'Installer payload differs from portable'
+      );
+      const raw = fs.readFileSync(path.join(install, 'install-metadata.json'));
+      const metadata = JSON.parse(raw.subarray(2).toString('utf16le'));
+      assert.equal(metadata.formatVersion, 1);
+      assert.equal(metadata.installDirectory, install);
+      fs.writeFileSync(path.join(install, 'unrelated.txt'), 'do not delete');
+      // Upgrade-in-place preserves all shared data and unrelated installation files.
+      run(installer, ['/S', '/NS', '/UPDATE', '/D=' + install]);
+      for (const directory of data)
+        assert.equal(
+          fs.readFileSync(path.join(directory, 'retain.txt'), 'utf8'),
+          'shared data sentinel'
+        );
+      run(path.join(install, 'uninstall.exe'), ['/S']);
+      for (let i = 0; i < 200 && fs.existsSync(path.join(install, 'yaoc.exe')); i++)
+        await sleep(100);
+      assert(!fs.existsSync(path.join(install, 'yaoc.exe')), 'Uninstall failed');
+      assert(!fs.existsSync(path.join(install, 'install-metadata.json')));
+      assert.equal(fs.readFileSync(path.join(install, 'unrelated.txt'), 'utf8'), 'do not delete');
+      for (const directory of data)
+        assert.equal(
+          fs.readFileSync(path.join(directory, 'retain.txt'), 'utf8'),
+          'shared data sentinel'
+        );
+      console.log(
+        'PASS: ' +
+          (forceArm64 ? 'forced ARM64 payload extraction' : 'native architecture selection') +
+          ', identical portable/installer payload, metadata, upgrade, silent uninstall, preserved shared data and unrelated files.'
+      );
+    }
   } finally {
     fs.writeFileSync(runtimeExe, preservedPayload);
     if (

@@ -1,6 +1,6 @@
 # Distribution and updates
 
-YAOC ships per-user NSIS installers and standalone single-file executables for Windows x64 and ARM64. Both contain the same application executable for a given architecture/version. "Portable" means no installer is required; settings stay on the Windows account.
+YAOC ships one combined per-user NSIS installer (`yaoc-setup.exe`) and standalone single-file executables for Windows x64 and ARM64. Both contain the same application executable for a given architecture/version. "Portable" means no installer is required; settings stay on the Windows account.
 
 Both modes share %APPDATA%\yaoc and the WebView2 profile at %LOCALAPPDATA%\io.github.lzs.yaoc. DPAPI-protected credentials remain account-bound. A user-profile file lock is acquired before mode detection, credentials, WebView2, notification integration or hotkeys. Another launch signals the primary to show its window and exits. Only one instance can use the shared profile, including across logon sessions (Windows cannot focus another session's desktop).
 
@@ -10,7 +10,7 @@ The installer creates install-metadata.json next to yaoc.exe, containing formatV
 
 Both modes check official releases using https://github.com/lzs/yaoc/releases/latest/download/installer-update.json. Versions must be stable SemVer newer than the running version; Beta builds also check official releases only. Discovery uses HTTPS; installer bytes require Tauri signature verification, independently of Authenticode. Discovery information alone never authorizes code execution.
 
-Installed mode uses tauri-plugin-updater, pinned in Cargo, to download/verify the architecture-specific NSIS installer. The download URL must belong to the exact versioned lzs/yaoc release. Installation verifies the bytes again and passes the running installation directory to NSIS. Existing drafts, attachments, active responses and unsaved/saving files block the confirmed install/restart action. Tauri saves window state before exiting, and NSIS waits for the exact installed executable to become writable before modifying it. No process-name-wide termination is used. Installation errors are reported; there is no automatic startup-crash rollback. Re-run a trusted installer if recovery is needed.
+Installed mode uses tauri-plugin-updater, pinned in Cargo, to download/verify the combined NSIS installer (the same signed file for both architecture entries). The download URL must belong to the exact versioned lzs/yaoc release. Installation verifies the bytes again and passes the running installation directory to NSIS. Existing drafts, attachments, active responses and unsaved/saving files block the confirmed install/restart action. Tauri saves window state before exiting, and NSIS waits for the exact installed executable to become writable before modifying it. No process-name-wide termination is used. Installation errors are reported; there is no automatic startup-crash rollback. Re-run a trusted installer if recovery is needed.
 
 Portable mode only reports the newer version and opens the official release page. Quit YAOC including the tray icon, download and extract the matching x64/ARM64 portable ZIP and replace the old executable with the extracted file. Shared settings remain intact. Backend commands reject download and install in portable mode. There is no portable self-replacement implementation, custom signed manifest or predecessor-wait protocol.
 
@@ -32,7 +32,7 @@ npm.cmd run notices
 npm.cmd run package:installers
 ```
 
-The packaging command bundles existing executables for both targets and then invokes package:portable, preserving three rolling backup generations in release/archive/. If Windows still holds the oldest image open, it is moved to release/archive/.in-use so the active session can continue; a later packaging run removes it after it exits. Outputs are release/yaoc-x64.exe, yaoc-arm64.exe, yaoc-x64-setup.exe and yaoc-arm64-setup.exe, plus yaoc-x64-portable.zip and yaoc-arm64-portable.zip (each containing the matching EXE, LICENSE and THIRD_PARTY_LICENSES.txt), notices and SHA256SUMS.txt covering the loose EXEs and ZIPs. Embedded WebView2Loader.dll is retained; portable copies still require the WebView2 runtime. NSIS can bootstrap the runtime.
+The packaging command captures the ARM64 payload first, then bundles both existing executables in one x64-hosted NSIS installer using native OS architecture detection and then invokes package:portable, preserving three rolling backup generations in release/archive/. If Windows still holds the oldest image open, it is moved to release/archive/.in-use so the active session can continue; a later packaging run removes it after it exits. Outputs are release/yaoc-x64.exe, yaoc-arm64.exe, yaoc-setup.exe, plus yaoc-x64-portable.zip and yaoc-arm64-portable.zip (each containing the matching EXE, LICENSE and THIRD_PARTY_LICENSES.txt), notices and SHA256SUMS.txt covering the loose EXEs and ZIPs. Embedded WebView2Loader.dll is retained; portable copies still require the WebView2 runtime. NSIS can bootstrap the runtime.
 
 Beta packaging can be unsigned for local testing. It does not publish official update metadata. If no updater public key was compiled into a Beta, installed update checks explain that installation is unconfigured and direct the user to manual downloads.
 
@@ -74,9 +74,9 @@ Remove-Variable yaocKeyPassword
 
 YAOC does not use Windows Authenticode signing. The owner has chosen not to obtain a certificate or signing service. Application executables and installers have no Windows publisher signature; Windows may display an unknown publisher or SmartScreen warning. This does not prevent distribution or Tauri updater signature verification. Official packaging requires only the Tauri updater public/private key configuration, not a certificate.
 
-The custom NSIS template captures the exact bundle-type-patched application payload before Tauri restores its input. Packaging promotes that payload to the target executable and portable outputs, then hashes it. A verified pristine backup allows repeat packaging. Tauri generates detached updater signatures for the completed installers.
+The custom NSIS template captures the exact bundle-type-patched application payload before Tauri restores its input. Packaging promotes that payload to the target executable and portable outputs, then hashes it. A verified pristine backup allows repeat packaging. Tauri generates detached updater signatures for the completed combined installer.
 
-package:installers generates installer-update.json for official builds from the two installer .sig files. Publish both portable ZIPs, both installers, both .sig files, installer-update.json, SHA256SUMS.txt, LICENSE and THIRD_PARTY_LICENSES.txt together as an immutable non-prerelease GitHub release tagged v<version>. Never publish Beta artifacts as official updates. No Tauri private signing identity is supplied by this repository.
+package:installers generates installer-update.json for official builds from the combined installer .sig file, mapping both Windows architectures to the same URL and signature. Publish both portable ZIPs, the combined installer, its .sig file, installer-update.json, SHA256SUMS.txt, LICENSE and THIRD_PARTY_LICENSES.txt together as an immutable non-prerelease GitHub release tagged v<version>. Never publish Beta artifacts as official updates. No Tauri private signing identity is supplied by this repository.
 
 ## Native acceptance checks
 

@@ -41,7 +41,7 @@ Keep the source checkout, documents, and agent instructions on the network drive
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1
 ```
 
-The script copies source inputs, installs dependencies locally, runs checks and browser tests, builds both Beta architectures, and packages both installers and portable executables. Its local `release/` directory retains the three rolling backup generations. Network `node_modules/`, `dist/`, `src-tauri/target/`, and `release/` directories are excluded from the copy. Only version manifests, lockfiles, and generated license notices are copied back to the source checkout, and concurrent source edits are preserved with a warning. Existing network build outputs can be retired separately.
+The script copies source inputs, installs dependencies locally, runs checks and browser tests, builds both Beta architectures, and packages the combined installer and both portable executables. Its local `release/` directory retains the three rolling backup generations. Network `node_modules/`, `dist/`, `src-tauri/target/`, and `release/` directories are excluded from the copy. Only version manifests, lockfiles, and generated license notices are copied back to the source checkout, and concurrent source edits are preserved with a warning. Existing network build outputs can be retired separately.
 
 The local folder is a build workspace; edit source in the network checkout and rerun the script to refresh it. Source mirroring removes stale source files locally while preserving the excluded dependency, build, and release directories. `run-app.bat` launches the local portable executable and runs this workflow if the executable is missing. The commands below should be run in the local build workspace.
 
@@ -82,7 +82,7 @@ npm.cmd run dist:all
 npm.cmd run dist:x64
 npm.cmd run dist:arm64
 
-# Rebuild notices, package both NSIS installers, then stage their identical portable payloads.
+# Rebuild notices, package one NSIS installer with both native builds, then stage portable payloads.
 npm.cmd run notices
 npm.cmd run package:installers
 ```
@@ -93,7 +93,7 @@ Official releases use `major.minor.patch`, such as `2026.1.0`. Normal builds use
 
 The Vite build generates one timestamp for both architectures. After emitting the frontend, `scripts/sync-version.cjs` stamps the same full version into `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` before Cargo runs. These files retain the most recent build version, so the UI, native Gateway identification, and Tauri metadata match. Subsequent builds replace the suffix; official builds remove it. Builds therefore update tracked version metadata. To bump the base version, update the matching manifests and lockfiles together; `npm.cmd run check` verifies consistency.
 
-Raw executables are `src-tauri/target/<target-triple>/release/yaoc.exe`. Packaging writes `release/yaoc-x64.exe`, `release/yaoc-arm64.exe`, and `SHA256SUMS.txt`, with three rolling `.0.exe`/`.1.exe`/`.2.exe` backups in `release/archive/`. A still-running oldest image is moved to `release/archive/.in-use` until a later packaging run can remove it. `package:installers` also writes `yaoc-x64-setup.exe` and `yaoc-arm64-setup.exe`; it captures the patched/signed NSIS payload so the portable executable matches byte-for-byte. See [UPDATES.md](UPDATES.md) for signing configuration and native acceptance commands. Portable downloads are `yaoc-x64-portable.zip` and `yaoc-arm64-portable.zip`, each containing the matching executable, `LICENSE`, and `THIRD_PARTY_LICENSES.txt` at the archive root. Packaging creates these ZIPs automatically and includes their hashes alongside the loose executable hashes in `SHA256SUMS.txt`. Publish the ZIPs as the portable downloads; keep the loose executables and rolling backups locally. The checked-in source tree excludes binaries and local build output.
+Raw executables are `src-tauri/target/<target-triple>/release/yaoc.exe`. Packaging writes `release/yaoc-x64.exe`, `release/yaoc-arm64.exe`, and `SHA256SUMS.txt`, with three rolling `.0.exe`/`.1.exe`/`.2.exe` backups in `release/archive/`. A still-running oldest image is moved to `release/archive/.in-use` until a later packaging run can remove it. `package:installers` also writes `yaoc-setup.exe`, containing both native architectures and selecting ARM64 or x64 automatically; it captures the patched/signed NSIS payload so the portable executable matches byte-for-byte. See [UPDATES.md](UPDATES.md) for signing configuration and native acceptance commands. Portable downloads are `yaoc-x64-portable.zip` and `yaoc-arm64-portable.zip`, each containing the matching executable, `LICENSE`, and `THIRD_PARTY_LICENSES.txt` at the archive root. Packaging creates these ZIPs automatically and includes their hashes alongside the loose executable hashes in `SHA256SUMS.txt`. Publish the ZIPs as the portable downloads; keep the loose executables and rolling backups locally. The checked-in source tree excludes binaries and local build output.
 
 The root `.cargo/config.toml` supplies both LLVM-MinGW linkers and `-C target-feature=+crt-static`. This avoids a separate `libunwind.dll`. The patched `webview2-com-sys` crate embeds the architecture-specific WebView2 loader. Windows system DLLs and the installed WebView2 Runtime remain runtime dependencies. Do not remove the patch or change `dragDropEnabled: false` without testing attachment drag-and-drop.
 
@@ -118,3 +118,47 @@ Edit `src/assets/yaoc.svg` and run `npm.cmd run icons`. Sharp is a declared deve
 - **Frontend changes missing:** use an npm build command. Calling Cargo alone embeds the existing `dist/` assets.
 - **WebView fails to start:** install/repair the Microsoft Edge WebView2 Runtime. Diagnostics are written to `%APPDATA%\yaoc\diagnostics.log`; redact private data before sharing logs.
 - **Shortcut already registered:** choose a different shortcut in Settings. Existing saved shortcuts override the default.
+
+## MSIX packages and bundle
+
+Run from the network source checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1 -Msix
+```
+
+This builds both Beta architectures and the existing EXE/ZIP installers, then creates local release/msix/yaoc-x64.msix, yaoc-arm64.msix, and yaoc.msixbundle. To package an existing matching build, run npm.cmd run package:msix in the local build workspace. Packaging checks executable product versions, uses MakeAppx's normal validation, includes licenses and tile icons, and writes separate checksums and build metadata. It never signs or publishes packages. Delivery to the network checkout is a separate verified copy.
+
+MakeAppx is provided by Windows SDK. Set YAOC_MAKEAPPX to its executable path, or download Microsoft's SDK build tools locally without a system installation. Run in the local build workspace:
+
+```powershell
+$tools = Join-Path $PWD '.local\msix-tools'
+New-Item -ItemType Directory -Path $tools -Force | Out-Null
+Invoke-WebRequest 'https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/10.0.26100.9169/microsoft.windows.sdk.buildtools.10.0.26100.9169.nupkg' -OutFile "$tools\sdk.zip"
+Expand-Archive -LiteralPath "$tools\sdk.zip" -DestinationPath "$tools\sdk" -Force
+npm.cmd run package:msix
+```
+
+The default identity is io.github.lzs.yaoc.dev, publisher CN=YAOC Development, and display name **YAOC Beta**. This is an unsigned development package, not a Store submission. Beta MSIX versions use year.MMDD.HHMM.0 with leading zeros removed; the embedded app retains its full Beta version. Repeat package versions do not constitute updates.
+
+For Store submission, reserve the product in Partner Center and supply the exact Product identity fields, plus an explicitly managed four-part version:
+
+```powershell
+$env:YAOC_MSIX_NAME = '<Package/Identity/Name>'
+$env:YAOC_MSIX_PUBLISHER = '<Package/Identity/Publisher>'
+$env:YAOC_MSIX_PUBLISHER_DISPLAY_NAME = '<PublisherDisplayName>'
+$env:YAOC_MSIX_VERSION = '2026.1.0.0'
+npm.cmd run package:msix
+```
+
+Supply all identity values together. Increase the package version for updates; its components must fit 0–65535, the first must be nonzero, and the last must be 0 for Store submissions. Package identity is separate from the Tauri identifier and portable notification identity.
+
+MSIX copies run as full-trust desktop applications on Windows 10 version 2004 or later and require Microsoft Edge WebView2 Runtime. The embedded loader remains present; MSIX does not bootstrap the runtime. Packaged copies use their Windows package notification identity and block the NSIS updater; updates belong to the Store or MSIX distribution source. File write virtualization is disabled using the restricted unvirtualizedResources capability so shared AppData remains accessible and survives uninstall. Explain this capability and runFullTrust during Store review.
+
+Unsigned packages cannot be installed directly by double-clicking. The Store signs approved submissions; direct distribution requires a Windows code-signing certificate trusted by the destination computer. Tauri updater keys cannot sign MSIX. For local testing, sign a copy with a development certificate and trust only its public certificate on the test machine. Never distribute a private key. Before publishing, run Windows App Certification Kit and test packaged launch, WebView2, notifications, shared data, updates and uninstall on x64 and ARM64.
+
+References: [MakeAppx packaging](https://learn.microsoft.com/en-us/windows/msix/package/create-app-package-with-makeappx-tool), [MSIX signing](https://learn.microsoft.com/en-us/windows/msix/package/sign-msix-package-guide), [virtualization and persistent data](https://learn.microsoft.com/en-us/windows/msix/desktop/flexible-virtualization).
+
+For an explicitly requested official build, load the updater signing environment described in UPDATES.md, then invoke the local workflow with both -Official and -Msix. The default remains Beta. Official installer packaging requires the existing Tauri updater key and its password; enter passwords locally and never store them in source or build logs. MSIX signing remains separate from installer updater signing.
+
+Official MSIX builds load the public Partner Center identity from src-tauri/windows/msix-store.json and map the app version to major.minor.patch.0. Environment values can override these defaults when necessary. Beta builds retain the development identity unless explicitly overridden.

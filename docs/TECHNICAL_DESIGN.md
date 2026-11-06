@@ -384,6 +384,8 @@ This achieves a **~33% binary size reduction**, bringing the standalone portable
 
 The composer keeps text and attachments per Gateway profile and agent/session key in memory. Switching sessions restores that session's draft, including when attachment reads finish after a switch. The send/stop control derives its busy state from `streamingSessionKeys`, the same state used by sidebar spinners. `src/runCompletion.ts` owns per-session run IDs, pending send tokens, completion deduplication, and bounded `agent.wait` requests (30-second server wait, 40-second RPC deadline). Wait-only timeouts and pending responses retry without declaring completion. Send acknowledgments and wait responses are checked against their original session/run ownership so stale outcomes cannot clear newer work; disconnect and component cleanup invalidate all outstanding trackers. Overlapping tracked runs keep the session busy until they all finish. Local abort and deletion clear state silently. Delayed send failures are never added to a different session's transcript, and history responses are discarded if their session is no longer selected. Waiting confirms individual runs, not work that OpenClaw might start later as a separate run.
 
+Gateway profile changes disconnect the previous transport before attempting the selected profile, including when the new connection fails. Initial profile loading still respects the saved auto-connect preference. The offline demo records completed run IDs before emitting its final chat event and answers `agent.wait` with the matching terminal status, allowing consecutive messages without manually stopping the run.
+
 ### YAOC branding and compatibility
 
 YAOC (pronounced “yoke”) expands to “Yet Another OpenClaw Chat”. The npm and Cargo package name is `yaoc`; raw Cargo output is `yaoc.exe`, and portable binaries are `yaoc-x64.exe` and `yaoc-arm64.exe` with three rolling backups each. The workspace directory is named `yaoc`.
@@ -455,11 +457,19 @@ The sidebar's labelled Shortcuts button, Ctrl+/, and the Show Keyboard Shortcuts
 
 ## Dual-mode distribution and installer updates
 
-The same application binary ships inside a per-user NSIS installer and as a standalone executable. distribution.rs validates installer-created, location-bound metadata; both modes share AppData and the explicitly selected WebView2 profile. instance.rs locks the user profile before any shared initialization and signals the existing window on a second launch.
+One combined per-user NSIS installer (`yaoc-setup.exe`) embeds both native builds and extracts ARM64 on native ARM64 Windows or x64 on native AMD64 Windows, rejecting unsupported architectures. ARM64 is captured first; the final x64-hosted bundle includes both exact payloads. The matching application binary also ships as a standalone executable. Both Tauri updater architecture entries reference the same combined installer and detached signature. distribution.rs validates installer-created, location-bound metadata; both modes share AppData and the explicitly selected WebView2 profile. instance.rs locks the user profile before any shared initialization and signals the existing window on a second launch.
 
 Only installed mode downloads/installs updates through tauri-plugin-updater with mandatory installer signatures. Portable mode reports official releases and opens the manual download page. The old portable replacement and signing protocol are removed. The renderer blocks installer restart while work is unsaved or active.
 
 The pinned custom NSIS template preserves all shared data and unrelated files, removes the data-deletion UI, and checks executable locks by installation path. Installer hooks create metadata and own installed toast registration; portable mode uses registry-only native WinRT toast registration under its own identity, with no shortcut writes. See [UPDATES.md](UPDATES.md) for packaging, signing, recovery limits and native validation.
+
+### MSIX distribution
+
+The optional local build switch `-Msix` invokes `scripts/package-msix.cjs` after standard packaging. It stages x64 and ARM64 payloads with visual assets and licenses, validates each package with MakeAppx, and creates an unsigned bundle. Development and Partner Center identities are independent of the Tauri identifier. Windows application identity selects `msix` mode before NSIS sidecar detection. Notifications use the package AUMID without portable registration; backend guards reject NSIS updates. The manifest disables AppData file write virtualization with `unvirtualizedResources` to retain shared state across modes and uninstall. See `docs/BUILD.md` for identity, versioning, signing and acceptance requirements.
+
+### Live tool activity
+
+The native Gateway handshake advertises `tool-events`. Tool cards appear from agent tool events before chat completion, with nested `data.phase` start/update/result states, partial output, and matching call IDs. Tool cards start collapsed in every state; expanding a card is a user choice retained across live updates. History accepts OpenClaw `toolCall` content blocks and `toolResult` messages alongside legacy formats, joins results to their calls, and displays unmatched results as collapsed tool cards instead of raw message bodies.
 
 ### Device approval guidance
 

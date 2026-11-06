@@ -33,6 +33,10 @@ fn register_portable(icon: &Path) -> Result<(), String> {
 
 pub fn initialize() -> Result<(), String> {
     let distribution = distribution::current();
+    if distribution.mode == Mode::Msix {
+        // Windows supplies the package AUMID; do not register an unpackaged identity.
+        return Ok(());
+    }
     let id = if distribution.mode == Mode::Portable {
         register_portable(
             &distribution
@@ -58,15 +62,18 @@ pub fn initialize() -> Result<(), String> {
     Ok(())
 }
 
-pub fn show_portable(app: AppHandle, title: &str, body: &str) -> Result<(), String> {
-    // Repair registration/icon after a manual cleanup without touching the installed identity.
-    register_portable(
-        &distribution::current()
-            .webview_directory
-            .join("notifications")
-            .join("portable.png"),
-    )?;
-    Toast::new(PORTABLE_ID)
+pub fn show(app: AppHandle, title: &str, body: &str) -> Result<(), String> {
+    let package_id = distribution::packaged_app_id()?;
+    // Only unpackaged portable copies own the portable registration.
+    if package_id.is_none() {
+        register_portable(
+            &distribution::current()
+                .webview_directory
+                .join("notifications")
+                .join("portable.png"),
+        )?;
+    }
+    Toast::new(package_id.as_deref().unwrap_or(PORTABLE_ID))
         .title(title)
         .text1(body)
         // YAOC already plays its configurable chime; avoid a second Windows sound.

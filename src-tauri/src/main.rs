@@ -323,6 +323,7 @@ pub struct GatewayState {
     connect_lock: Mutex<()>,
     req_counter: AtomicU64,
     is_mock: Mutex<bool>,
+    mock_completed_runs: Mutex<Vec<String>>,
     mock_files: Mutex<HashMap<String, String>>,
     mock_session_models: Mutex<HashMap<String, String>>,
     mock_session_thinking: Mutex<HashMap<String, String>>,
@@ -364,6 +365,7 @@ impl GatewayState {
             pending: Arc::new(Mutex::new(HashMap::new())),
             req_counter: AtomicU64::new(1),
             is_mock: Mutex::new(false),
+            mock_completed_runs: Mutex::new(Vec::new()),
             mock_files: Mutex::new(mock_files),
             mock_session_models: Mutex::new(HashMap::new()),
             mock_session_thinking: Mutex::new(HashMap::new()),
@@ -390,6 +392,7 @@ impl GatewayState {
         }
         self.connection_epoch.fetch_add(1, Ordering::SeqCst);
         *self.is_mock.lock().await = false;
+        self.mock_completed_runs.lock().await.clear();
         self.ws_tx.lock().await.take();
         for (_, sender) in self.pending.lock().await.drain() {
             let _ = sender.send(Err(json!({ "message": "Disconnected" })));
@@ -958,7 +961,7 @@ async fn gateway_connect(
         },
         "role": role,
         "scopes": scopes,
-        "caps": [],
+        "caps": ["tool-events"],
         "commands": [],
         "permissions": {},
         "locale": "en-US",
@@ -1093,6 +1096,14 @@ async fn gateway_request(
             Err(msg)
         }
     }
+}
+
+fn mock_wait_result(completed_runs: &[String], params: &Value) -> Result<Value, String> {
+    let run_id = params.get("runId").and_then(Value::as_str).unwrap_or("");
+    if !completed_runs.iter().any(|id| id == run_id) {
+        return Err("Demo run not found".to_string());
+    }
+    Ok(json!({ "runId": run_id, "status": "ok" }))
 }
 
 async fn handle_mock_request(
@@ -1311,8 +1322,12 @@ async fn handle_mock_request(
                 .insert(name.clone(), content.clone());
             Ok(json!({ "ok": true, "success": true, "path": name, "bytesWritten": content.len() }))
         }
+        "agent.wait" => {
+            let runs = state.mock_completed_runs.lock().await;
+            mock_wait_result(&runs, &params)
+        }
         "chat.send" => {
-            let run_id = format!("run-{}", now_ms());
+            let run_id = format!("run-{}", state.req_counter.fetch_add(1, Ordering::SeqCst));
             let user_msg = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
             let att_count = params
                 .get("attachments")
@@ -1327,6 +1342,14 @@ async fn handle_mock_request(
             } else {
                 format!("Demo reply:\n\n> {}", user_msg)
             };
+            // Record completion before emitting: waiting can precede the send acknowledgment.
+            {
+                let mut runs = state.mock_completed_runs.lock().await;
+                runs.push(run_id.clone());
+                if runs.len() > 256 {
+                    runs.remove(0);
+                }
+            }
             let _ = app.emit(
                 "gateway:event",
                 json!({
@@ -1483,8 +1506,8 @@ fn show_notification(
         play_notification_sound(None);
     }
     #[cfg(windows)]
-    if distribution::current().mode == distribution::Mode::Portable {
-        return native_notifications::show_portable(app, &title, &body);
+    if distribution::current().mode != distribution::Mode::Installed {
+        return native_notifications::show(app, &title, &body);
     }
     match app.notification().builder().title(title).body(body).show() {
         Ok(()) => {
@@ -2249,6 +2272,17 @@ mod tests {
         assert!(!state.disconnect_connection(Some(old_epoch), None).await);
         assert!(state.ws_tx.lock().await.is_some());
     }
+    #[test]
+    fn demo_wait_confirms_only_completed_runs() {
+        let runs = vec!["run-1".to_string(), "run-2".to_string()];
+        let result = mock_wait_result(&runs, &json!({ "runId": "run-1" })).unwrap();
+        assert_eq!(result["status"], "ok");
+        assert_eq!(result["runId"], "run-1");
+        assert!(mock_wait_result(&runs, &json!({ "runId": "unknown" })).is_err());
+        assert!(mock_wait_result(&runs, &json!({})).is_err());
+        assert!(mock_wait_result(&[], &json!({ "runId": "run-1" })).is_err());
+    }
+
     #[test]
     fn unicode_gateway_endpoints_do_not_panic() {
         for (input, expected) in [

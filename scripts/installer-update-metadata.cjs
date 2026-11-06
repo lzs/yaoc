@@ -9,11 +9,8 @@ function generate(
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version))
     throw new Error('Only official versions may be published as updates');
   const platforms = {};
-  for (const [arch, target] of [
-    ['x64', 'windows-x86_64'],
-    ['arm64', 'windows-aarch64'],
-  ]) {
-    const name = 'yaoc-' + arch + '-setup.exe';
+  for (const target of ['windows-x86_64', 'windows-aarch64']) {
+    const name = 'yaoc-setup.exe';
     if (!fs.statSync(path.join(directory, name)).isFile())
       throw new Error('Missing installer ' + name);
     const signature = fs.readFileSync(path.join(directory, name + '.sig'), 'utf8').trim();

@@ -123,7 +123,7 @@ export interface SystemInfo {
   runtime?: string;
   encryptedStorage?: boolean;
   distribution?: {
-    mode: 'installed' | 'portable';
+    mode: 'installed' | 'portable' | 'msix';
     executable: string;
     dataDirectory: string;
     webviewDirectory: string;

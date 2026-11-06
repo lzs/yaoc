@@ -169,6 +169,34 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       }
       await sleep(100);
     }
+    // The debug endpoint can close before WebView2 finishes flushing its profile.
+    // Do not open the same profile in another process until all test-owned browser
+    // processes have exited; checking only the parent/port races localStorage commits.
+    const waitForBrowserExit = cp.spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `
+        $deadline = [DateTime]::UtcNow.AddSeconds(15)
+        do {
+          $owned = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" |
+            Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($env:YAOC_NATIVE_PROFILE, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+          if ($owned.Count -eq 0) { exit 0 }
+          Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        throw 'Test WebView2 processes did not exit'
+      `,
+      ],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+        env: { ...process.env, YAOC_NATIVE_PROFILE: path.join(local, 'io.github.lzs.yaoc') },
+      }
+    );
+    if (waitForBrowserExit.error) throw waitForBrowserExit.error;
+    assert.equal(waitForBrowserExit.status, 0, waitForBrowserExit.stderr);
     const nextServer = net.createServer();
     await new Promise((resolve) => nextServer.listen(0, '127.0.0.1', resolve));
     port = nextServer.address().port;

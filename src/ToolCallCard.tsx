@@ -104,7 +104,7 @@ export function ToolCallCard({ toolCall }: { toolCall: ToolCallItem }) {
   const isRunning = status === 'running';
   const isError = status === 'error' || Boolean(toolCall.error);
 
-  const [isExpanded, setIsExpanded] = useState<boolean>(() => isRunning || isError);
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [copiedArgs, setCopiedArgs] = useState(false);
   const [copiedOutput, setCopiedOutput] = useState(false);
 

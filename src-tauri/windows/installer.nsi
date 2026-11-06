@@ -48,6 +48,10 @@ ${StrLoc}
 !define COPYRIGHT "{{copyright}}"
 !define OUTFILE "{{out_file}}"
 !define ARCH "{{arch}}"
+; The final installer embeds the captured native ARM64 payload.
+!if "$%YAOC_ARM64_PAYLOAD%" != ""
+  !define YAOC_ARM64_PAYLOAD "$%YAOC_ARM64_PAYLOAD%"
+!endif
 !define ADDITIONALPLUGINSPATH "{{additional_plugins_path}}"
 !define ALLOWDOWNGRADES "{{allow_downgrades}}"
 !define DISPLAYLANGUAGESELECTOR "{{display_language_selector}}"
@@ -416,6 +420,13 @@ FunctionEnd
 {{/each}}
 
 Function .onInit
+  ; Detect the native OS, not the emulated installer process architecture.
+  ${IfNot} ${IsNativeAMD64}
+  ${AndIfNot} ${IsNativeARM64}
+    MessageBox MB_OK|MB_ICONSTOP "YAOC requires Windows for x64 or ARM64." /SD IDOK
+    SetErrorLevel 1633
+    Quit
+  ${EndIf}
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
     StrCpy $PassiveMode 1
@@ -587,8 +598,16 @@ Section Install
 
   ; Capture exact payload before Tauri restores its input.
   !system '"$%YAOC_NODE_EXECUTABLE%" "$%YAOC_CAPTURE_SCRIPT%" "${MAINBINARYSRCPATH}"' = 0
-  ; Copy main executable
-  File "${MAINBINARYSRCPATH}"
+  ; Both payloads are embedded; extract only the native application.
+  !ifdef YAOC_ARM64_PAYLOAD
+    ${If} ${IsNativeARM64}
+      File "/oname=${MAINBINARYNAME}.exe" "${YAOC_ARM64_PAYLOAD}"
+    ${Else}
+      File "${MAINBINARYSRCPATH}"
+    ${EndIf}
+  !else
+    File "${MAINBINARYSRCPATH}"
+  !endif
 
   ; Copy resources
   {{#each resources_dirs}}

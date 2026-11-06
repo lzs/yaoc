@@ -27,6 +27,8 @@ test(
         ['x64', 'x86_64-pc-windows-gnullvm'],
         ['arm64', 'aarch64-pc-windows-gnullvm'],
       ];
+      fs.mkdirSync(path.join(root, 'release'));
+      fs.writeFileSync(path.join(root, 'release/yaoc-setup.exe'), 'combined installer fixture');
       for (let generation = 0; generation < 2; generation++) {
         for (const [arch, triple] of targets) {
           const dir = path.join(root, 'src-tauri/target', triple, 'release');
@@ -51,7 +53,8 @@ test(
           .readFileSync(path.join(release, 'SHA256SUMS.txt'), 'utf8')
           .trim()
           .split('\n');
-        assert.equal(checksumLines.length, 4);
+        assert.equal(checksumLines.length, 5);
+        assert(checksumLines.some((line) => line.endsWith('  yaoc-setup.exe')));
         for (const line of checksumLines) {
           const [expected, name] = line.split('  ');
           assert.equal(

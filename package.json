@@ -1,6 +1,6 @@
 {
   "name": "yaoc",
-  "version": "2026.1.1-dev11061414",
+  "version": "2026.1.1-dev11061627",
   "description": "Lightweight, non-blocking OpenClaw Gateway Chat & Workspace Client for Windows (x64 & ARM64)",
   "private": true,
   "scripts": {
@@ -30,7 +30,8 @@
     "updates:metadata": "node scripts/installer-update-metadata.cjs",
     "test:native:distribution": "node tests/native-distribution-smoke.cjs",
     "test:native:installer": "node tests/native-installer-smoke.cjs",
-    "release:package": "node scripts/build-official.cjs"
+    "release:package": "node scripts/build-official.cjs",
+    "package:msix": "node scripts/package-msix.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

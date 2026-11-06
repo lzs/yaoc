@@ -68,5 +68,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          gh release create "v$version" release/yaoc-x64-portable.zip release/yaoc-arm64-portable.zip release/yaoc-x64-setup.exe release/yaoc-arm64-setup.exe release/yaoc-x64-setup.exe.sig release/yaoc-arm64-setup.exe.sig release/installer-update.json release/SHA256SUMS.txt release/LICENSE release/THIRD_PARTY_LICENSES.txt --draft --title "YAOC $version" --target $env:GITHUB_SHA --generate-notes
+          gh release create "v$version" release/yaoc-x64-portable.zip release/yaoc-arm64-portable.zip release/yaoc-setup.exe release/yaoc-setup.exe.sig release/installer-update.json release/SHA256SUMS.txt release/LICENSE release/THIRD_PARTY_LICENSES.txt --draft --title "YAOC $version" --target $env:GITHUB_SHA --generate-notes
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -11,6 +11,7 @@ use std::{
 pub enum Mode {
     Installed,
     Portable,
+    Msix,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +67,36 @@ fn detect(executable: &Path) -> Result<Mode, String> {
     }
     Ok(Mode::Installed)
 }
+// A package identity takes precedence over sidecar metadata. Never treat MSIX as NSIS.
+#[cfg(windows)]
+pub fn packaged_app_id() -> Result<Option<String>, String> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentApplicationUserModelId(length: *mut u32, id: *mut u16) -> i32;
+    }
+    let mut length = 0;
+    let result = unsafe { GetCurrentApplicationUserModelId(&mut length, std::ptr::null_mut()) };
+    if result == 15703 {
+        // APPMODEL_ERROR_NO_APPLICATION
+        return Ok(None);
+    }
+    if result != 122 {
+        // ERROR_INSUFFICIENT_BUFFER
+        return Err(format!("Cannot query Windows package identity: {result}"));
+    }
+    let mut buffer = vec![0u16; length as usize];
+    let result = unsafe { GetCurrentApplicationUserModelId(&mut length, buffer.as_mut_ptr()) };
+    if result != 0 {
+        return Err(format!("Cannot read Windows package identity: {result}"));
+    }
+    let id = String::from_utf16(&buffer[..length.saturating_sub(1) as usize])
+        .map_err(|e| e.to_string())?;
+    Ok(Some(id))
+}
+#[cfg(not(windows))]
+pub fn packaged_app_id() -> Result<Option<String>, String> {
+    Ok(None)
+}
 pub fn initialize() -> Result<(), String> {
     let executable = std::env::current_exe()
         .and_then(|p| p.canonicalize())
@@ -75,7 +106,11 @@ pub fn initialize() -> Result<(), String> {
         .filter(|p| p.is_absolute())
         .ok_or("LOCALAPPDATA must be an absolute directory")?;
     let distribution = Distribution {
-        mode: detect(&executable)?,
+        mode: if packaged_app_id()?.is_some() {
+            Mode::Msix
+        } else {
+            detect(&executable)?
+        },
         executable,
         data_directory: crate::storage::user_storage_dir()?,
         webview_directory: local.join("io.github.lzs.yaoc"),
@@ -96,7 +131,12 @@ fn require_mode(mode: Mode) -> Result<(), String> {
     if mode == Mode::Installed {
         Ok(())
     } else {
-        Err("Portable copies must be updated manually from the official download page.".into())
+        Err(if mode == Mode::Msix {
+            "MSIX updates are managed by Microsoft Store or your MSIX distribution source."
+        } else {
+            "Portable copies must be updated manually from the official download page."
+        }
+        .into())
     }
 }
 
@@ -106,6 +146,7 @@ mod tests {
     #[test]
     fn portable_cannot_install() {
         assert!(require_mode(Mode::Portable).is_err());
+        assert!(require_mode(Mode::Msix).unwrap_err().contains("MSIX"));
         assert!(require_mode(Mode::Installed).is_ok());
     }
     #[test]

@@ -169,13 +169,14 @@ function extractToolCallsFromRaw(rawMsg: any): ToolCallItem[] {
   if (Array.isArray(rawMsg.content)) {
     for (const part of rawMsg.content) {
       if (!part || typeof part !== 'object') continue;
-      if (part.type === 'tool_use' || part.type === 'tool_call') {
+      if (part.type === 'tool_use' || part.type === 'tool_call' || part.type === 'toolCall') {
         const id = String(part.id || part.toolCallId || `tc-${result.length}`);
         if (!result.some((r) => r.id === id)) {
           const name = String(part.name || part.toolName || 'tool');
           const args =
             part.input ??
             part.args ??
+            part.arguments ??
             part.parameters ??
             (part.function?.arguments ? safeParseJson(part.function.arguments) : undefined);
           result.push({
@@ -1105,6 +1106,17 @@ export default function App() {
     return () => window.removeEventListener('focus', reconnectOnFocus);
   }, [profilesLoaded, activeProfile]);
 
+  // Loading the saved selection is separate from later Gateway switches.
+  const previousProfileIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!profilesLoaded) return;
+    const previous = previousProfileIdRef.current;
+    previousProfileIdRef.current = activeProfileId;
+    if (previous !== null && previous !== activeProfileId && activeProfile) {
+      connectGateway(activeProfile).catch(() => {});
+    }
+  }, [profilesLoaded, activeProfileId]);
+
   // Auto-poll when in 'pairing' state (just like OpenClaw Web Control UI!)
   useEffect(() => {
     if (connStatus.state !== 'pairing' || !autoPollPairing || !activeProfile) return;
@@ -1597,27 +1609,28 @@ export default function App() {
           const tcRaw = payload.toolCall || payload.tool || payload.data || payload;
           const tcId = String(tcRaw.id || tcRaw.toolCallId || tcRaw.call_id || `tc-${Date.now()}`);
           const tcName = String(tcRaw.name || tcRaw.toolName || tcRaw.function?.name || 'tool');
-          const phase = payload.phase || payload.lifecycle;
+          const phase = tcRaw.phase || payload.phase || payload.lifecycle;
           const tcStatus: 'running' | 'completed' | 'error' =
             tcRaw.status === 'running' || tcRaw.status === 'error' || tcRaw.status === 'completed'
               ? tcRaw.status
-              : phase === 'start'
-                ? 'running'
-                : tcRaw.error
-                  ? 'error'
+              : tcRaw.error || tcRaw.isError
+                ? 'error'
+                : phase === 'start' || phase === 'update' || phase === 'input_delta'
+                  ? 'running'
                   : 'completed';
           const tcArgs =
             tcRaw.args ??
             tcRaw.input ??
             tcRaw.parameters ??
             (tcRaw.function?.arguments ? safeParseJson(tcRaw.function.arguments) : undefined);
-          const tcResult = tcRaw.result ?? tcRaw.output ?? tcRaw.response;
+          const tcResult = tcRaw.result ?? tcRaw.partialResult ?? tcRaw.output ?? tcRaw.response;
           const tcError = tcRaw.error
             ? typeof tcRaw.error === 'string'
               ? tcRaw.error
               : JSON.stringify(tcRaw.error)
             : undefined;
-          const tcExitCode = typeof tcRaw.exitCode === 'number' ? tcRaw.exitCode : undefined;
+          const exitCode = tcRaw.exitCode ?? tcResult?.details?.exitCode;
+          const tcExitCode = typeof exitCode === 'number' ? exitCode : undefined;
           const tcDuration = typeof tcRaw.durationMs === 'number' ? tcRaw.durationMs : undefined;
 
           const now = Date.now();
@@ -1641,7 +1654,7 @@ export default function App() {
                 itemToStore = {
                   ...prevItem,
                   id: tcId,
-                  name: tcName || prevItem.name,
+                  name: tcName === 'tool' ? prevItem.name : tcName,
                   status: tcStatus,
                   args: tcArgs !== undefined ? tcArgs : prevItem.args,
                   result: tcResult !== undefined ? tcResult : prevItem.result,
@@ -1967,10 +1980,10 @@ export default function App() {
       >();
 
       for (const m of rawMessages) {
-        if (m?.role === 'tool' || m?.role === 'tool_result') {
-          const callId = String(m.tool_call_id || m.tool_use_id || m.id || '');
+        if (m?.role === 'tool' || m?.role === 'tool_result' || m?.role === 'toolResult') {
+          const callId = String(m.toolCallId || m.tool_call_id || m.tool_use_id || m.id || '');
           if (callId) {
-            const isErr = Boolean(m.is_error || m.error);
+            const isErr = Boolean(m.isError || m.is_error || m.error);
             const content = m.content ?? m.text ?? m.result ?? m.output;
             toolResultsMap.set(callId, {
               result: isErr ? undefined : content,
@@ -2033,9 +2046,9 @@ export default function App() {
 
           // If this is a standalone tool message whose result was already merged into an assistant message,
           // skip it to prevent duplicate blank message bubbles.
-          const callId = String(m.tool_call_id || m.tool_use_id || '');
+          const callId = String(m.toolCallId || m.tool_call_id || m.tool_use_id || '');
           if (
-            (m.role === 'tool' || m.role === 'tool_result') &&
+            (m.role === 'tool' || m.role === 'tool_result' || m.role === 'toolResult') &&
             callId &&
             toolResultsMap.has(callId)
           ) {
@@ -2050,17 +2063,32 @@ export default function App() {
             }
           }
 
+          const isToolResult =
+            m.role === 'tool' || m.role === 'tool_result' || m.role === 'toolResult';
+          if (isToolResult && toolCalls.length === 0) {
+            const result = toolResultsMap.get(callId);
+            toolCalls.push({
+              id: callId || `tool-result-${idx}`,
+              name: m.toolName || m.name || 'tool',
+              status:
+                result?.status || (m.isError || m.is_error || m.error ? 'error' : 'completed'),
+              result: result?.result ?? m.content ?? m.text ?? m.result ?? m.output,
+              error: result?.error,
+              exitCode: result?.exitCode,
+            });
+          }
+
           const role =
             m.role === 'user' || m.role === 'assistant' || m.role === 'system'
               ? m.role
-              : m.role === 'tool' || m.role === 'tool_result'
+              : m.role === 'tool' || m.role === 'tool_result' || m.role === 'toolResult'
                 ? 'system'
                 : 'assistant';
 
           return {
             id: m.id || `hist-${idx}-${Date.now()}`,
             role: role as 'user' | 'assistant' | 'system',
-            content: extractMessageText(m.content ?? m.text ?? ''),
+            content: isToolResult ? '' : extractMessageText(m.content ?? m.text ?? ''),
             thinking: extractThinkingText(m) || undefined,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
             attachments: attachments.length > 0 ? attachments : undefined,
@@ -2356,6 +2384,7 @@ export default function App() {
     ++connectionGenerationRef.current;
     ++pendingConnectionAttemptsRef.current;
     try {
+      await api.disconnect();
       await api.connect(profile);
     } finally {
       --pendingConnectionAttemptsRef.current;
@@ -3965,8 +3994,8 @@ export default function App() {
                       onClick={() => {
                         const demo = profiles.find((p) => p.endpoint.startsWith('mock://'));
                         if (demo) {
-                          setActiveProfileId(demo.id);
-                          handleConnect(demo);
+                          if (demo.id === activeProfileId) handleConnect(demo);
+                          else setActiveProfileId(demo.id);
                         }
                       }}
                     >
@@ -5152,7 +5181,11 @@ export default function App() {
                     {sysInfo?.distribution && (
                       <div className="form-row">
                         <label>
-                          {sysInfo.distribution.mode === 'installed' ? 'Installed' : 'Portable'}
+                          {sysInfo.distribution.mode === 'msix'
+                            ? 'MSIX'
+                            : sysInfo.distribution.mode === 'installed'
+                              ? 'Installed'
+                              : 'Portable'}
                         </label>
                         <p className="settings-help" style={{ overflowWrap: 'anywhere' }}>
                           {sysInfo.distribution.executable}

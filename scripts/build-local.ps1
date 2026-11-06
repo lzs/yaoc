@@ -1,7 +1,9 @@
 # Run from the source checkout. Build products stay in the local workspace.
 [CmdletBinding()]
 param(
-    [string]$BuildRoot = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'ChatGPT\yaoc')
+    [string]$BuildRoot = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'ChatGPT\yaoc'),
+    [switch]$Msix,
+    [switch]$Official
 )
 $ErrorActionPreference = 'Stop'
 $sourceRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent)).TrimEnd('\')
@@ -29,6 +31,8 @@ if ($LASTEXITCODE -ge 8) { throw "Source copy failed ($LASTEXITCODE)." }
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:LOCALAPPDATA\Programs\llvm-mingw\bin;" + $env:PATH
 # Ensure caller overrides cannot redirect compilation back to a network cache.
 $oldTarget = $env:CARGO_TARGET_DIR
+$oldOfficialTest = $env:YAOC_TEST_OFFICIAL
+$env:YAOC_TEST_OFFICIAL = if ($Official) { '1' } else { '0' }
 $env:CARGO_TARGET_DIR = Join-Path $BuildRoot 'src-tauri\target'
 Push-Location $BuildRoot
 try {
@@ -38,17 +42,27 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Source checks failed.' }
     npm.cmd test
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
-    npm.cmd run dist:all
-    if ($LASTEXITCODE -ne 0) { throw 'Beta build failed.' }
+    if ($Official) {
+        npm.cmd run release
+        if ($LASTEXITCODE -ne 0) { throw 'Official build failed.' }
+    } else {
+        npm.cmd run dist:all
+        if ($LASTEXITCODE -ne 0) { throw 'Beta build failed.' }
+    }
     npm.cmd run test:browser
     if ($LASTEXITCODE -ne 0) { throw 'Browser tests failed.' }
     npm.cmd run notices
     if ($LASTEXITCODE -ne 0) { throw 'Notice generation failed.' }
     npm.cmd run package:installers
     if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
+    if ($Msix) {
+        npm.cmd run package:msix
+        if ($LASTEXITCODE -ne 0) { throw 'MSIX packaging failed.' }
+    }
 } finally {
     Pop-Location
     $env:CARGO_TARGET_DIR = $oldTarget
+    $env:YAOC_TEST_OFFICIAL = $oldOfficialTest
     # Return only generated source metadata, preserving any concurrent source edits.
     foreach ($file in $metadata) {
         $source = Join-Path $sourceRoot $file
@@ -60,4 +74,4 @@ try {
         }
     }
 }
-Write-Host "Beta installers and portable executables: $(Join-Path $BuildRoot 'release')"
+Write-Host "Installers and portable executables: $(Join-Path $BuildRoot 'release')"

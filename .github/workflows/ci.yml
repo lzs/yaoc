@@ -60,8 +60,7 @@ jobs:
           path: |
             release/yaoc-x64-portable.zip
             release/yaoc-arm64-portable.zip
-            release/yaoc-x64-setup.exe
-            release/yaoc-arm64-setup.exe
+            release/yaoc-setup.exe
             release/SHA256SUMS.txt
             release/LICENSE
             release/THIRD_PARTY_LICENSES.txt

@@ -4,25 +4,24 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { generate } = require('../scripts/installer-update-metadata.cjs');
-test('installer update metadata requires both signatures and stable version', () => {
+test('installer update metadata uses one signed combined installer for both architectures', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yaoc-metadata-'));
   try {
     assert.throws(() => generate(dir, '2027.1.0-dev123'), /official/);
-    for (const arch of ['x64', 'arm64'])
-      fs.writeFileSync(path.join(dir, 'yaoc-' + arch + '-setup.exe'), 'test installer');
+    fs.writeFileSync(path.join(dir, 'yaoc-setup.exe'), 'test installer');
     assert.throws(() => generate(dir, '2027.1.0'));
-    for (const arch of ['x64', 'arm64'])
-      fs.writeFileSync(
-        path.join(dir, 'yaoc-' + arch + '-setup.exe.sig'),
-        Buffer.from('signature fixture').toString('base64')
-      );
+    fs.writeFileSync(
+      path.join(dir, 'yaoc-setup.exe.sig'),
+      Buffer.from('signature fixture').toString('base64')
+    );
     const metadata = generate(dir, '2027.1.0');
     assert.equal(
       metadata.platforms['windows-aarch64'].url,
-      'https://github.com/lzs/yaoc/releases/download/v2027.1.0/yaoc-arm64-setup.exe'
+      'https://github.com/lzs/yaoc/releases/download/v2027.1.0/yaoc-setup.exe'
     );
     assert.equal(Object.keys(metadata.platforms).length, 2);
-    fs.writeFileSync(path.join(dir, 'yaoc-x64-setup.exe.sig'), '');
+    assert.deepEqual(metadata.platforms['windows-x86_64'], metadata.platforms['windows-aarch64']);
+    fs.writeFileSync(path.join(dir, 'yaoc-setup.exe.sig'), '');
     assert.throws(() => generate(dir, '2027.1.0'), /signature/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

@@ -118,6 +118,7 @@ try {
       fs.rmSync(stagedZip, { force: true });
     }
   }
+  if (fs.existsSync(path.join(release, 'yaoc-setup.exe'))) artifacts.push('yaoc-setup.exe');
   fs.writeFileSync(
     path.join(release, 'SHA256SUMS.txt'),
     artifacts.map((name) => `${hash(path.join(release, name))}  ${name}`).join('\n') + '\n'

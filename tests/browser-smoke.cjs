@@ -75,6 +75,7 @@ async function openApp(browser, options = {}) {
             thinkingDefault: model === 'provider/model-12' ? 'low' : 'adaptive',
           };
     window.testConnectCalls = [];
+    window.testConnectionActions = [];
     window.testEmitStatus = (status) => {
       for (const callback of callbacks) callback(status);
     };
@@ -127,7 +128,9 @@ async function openApp(browser, options = {}) {
       loadProfiles: async () => {
         if (options.loadError) throw new Error('Unreadable profile fixture');
         return {
-          profiles: [{ id: 'test', name: 'Test Gateway', endpoint: 'mock://demo' }],
+          profiles: options.profiles || [
+            { id: 'test', name: 'Test Gateway', endpoint: 'mock://demo' },
+          ],
           activeProfileId: 'test',
           uiState: {
             autoConnect: options.autoConnect ?? true,
@@ -149,8 +152,9 @@ async function openApp(browser, options = {}) {
         gatewayCallbacks.add(callback);
         return () => gatewayCallbacks.delete(callback);
       },
-      connect: async (profile) => {
+      connect: async (profile = { id: 'test', endpoint: 'mock://demo' }) => {
         window.testConnectCalls.push(profile);
+        window.testConnectionActions.push('connect:' + profile.id);
         if (window.testConnectMode === 'pending') {
           await new Promise((resolve) => {
             window.testResolveConnect = resolve;
@@ -160,10 +164,12 @@ async function openApp(browser, options = {}) {
           window.testEmitStatus({ state: 'error', message: 'Gateway unavailable' });
           throw new Error('Gateway unavailable');
         }
-        for (const callback of callbacks) callback({ state: 'connected', endpoint: 'mock://demo' });
+        for (const callback of callbacks)
+          callback({ state: 'connected', profileId: profile.id, endpoint: profile.endpoint });
         return { ok: true };
       },
       disconnect: async () => {
+        window.testConnectionActions.push('disconnect');
         for (const callback of callbacks) callback({ state: 'disconnected' });
         return { ok: true };
       },
@@ -272,7 +278,7 @@ async function openApp(browser, options = {}) {
         }
         if (method === 'chat.history')
           return {
-            messages: [
+            messages: options.historyMessages || [
               {
                 id: 'test-message',
                 role: 'assistant',
@@ -551,6 +557,38 @@ async function openApp(browser, options = {}) {
         .locator('.message-card.system.error')
         .filter({ hasText: 'Could not reset session:' })
         .waitFor();
+      await page.close();
+    }
+    {
+      const page = await openApp(browser, {
+        profiles: [
+          { id: 'test', name: 'Test Gateway', endpoint: 'mock://demo' },
+          { id: 'second', name: 'Second Gateway', endpoint: 'ws://second.invalid' },
+        ],
+      });
+      await page.waitForFunction(() => document.querySelector('.status-dot.connected'));
+      const select = async (name) => {
+        await page.getByRole('button', { name: 'Active Gateway profile', exact: true }).click();
+        await page.getByRole('option', { name: new RegExp('^' + name + ' ') }).click();
+      };
+      await select('Second Gateway');
+      await page.waitForFunction(() => window.testConnectCalls.length === 2);
+      await page.waitForFunction(() => document.querySelector('.status-dot.connected'));
+      assert.deepEqual(await page.evaluate(() => window.testConnectionActions), [
+        'disconnect',
+        'connect:test',
+        'disconnect',
+        'connect:second',
+      ]);
+      await page.evaluate(() => {
+        window.testConnectMode = 'error';
+      });
+      await select('Test Gateway');
+      await page.waitForFunction(() => document.querySelector('.status-dot.error'));
+      assert.deepEqual(await page.evaluate(() => window.testConnectionActions.slice(-2)), [
+        'disconnect',
+        'connect:test',
+      ]);
       await page.close();
     }
     {
@@ -1004,6 +1042,127 @@ async function openApp(browser, options = {}) {
       assert.deepEqual(errors, []);
       await page.close();
     }
+    // Tool activity must be visible before chat final, without exposing output by default.
+    const tools = await openApp(browser, {
+      manualRunCompletion: true,
+      historyMessages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'history-call',
+              name: 'read',
+              arguments: { path: 'config.json' },
+            },
+          ],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'history-call',
+          toolName: 'read',
+          content: [{ type: 'text', text: 'HISTORY_TOOL_OUTPUT' }],
+        },
+        {
+          role: 'toolResult',
+          toolCallId: 'orphan-call',
+          toolName: 'exec',
+          content: [{ type: 'text', text: 'ORPHAN_TOOL_OUTPUT' }],
+        },
+      ],
+    });
+    const historyCards = tools.getByTestId('tool-call-card');
+    await historyCards.nth(1).waitFor();
+    assert.equal(await historyCards.count(), 2, 'Results join calls without duplicate raw bubbles');
+    assert.equal(await tools.getByText('HISTORY_TOOL_OUTPUT', { exact: true }).count(), 0);
+    assert.equal(await tools.getByText('ORPHAN_TOOL_OUTPUT', { exact: true }).count(), 0);
+    await historyCards.first().locator('.tool-card-header').click();
+    await historyCards
+      .first()
+      .locator('.tool-output-content')
+      .filter({ hasText: 'HISTORY_TOOL_OUTPUT' })
+      .waitFor();
+    const toolInput = tools.getByRole('textbox', { name: 'Message Assistant', exact: true });
+    await toolInput.fill('Run a command');
+    await toolInput.press('Enter');
+    await tools.waitForFunction(() => window.testRequests.some((r) => r.method === 'agent.wait'));
+    const emitTool = (data, sessionKey = 'main') =>
+      tools.evaluate(
+        ({ data, sessionKey }) => {
+          window.testEmitGatewayEvent({
+            event: 'agent',
+            payload: {
+              sessionKey,
+              runId: sessionKey === 'main' ? 'test-run' : 'background-run',
+              stream: 'tool',
+              data,
+            },
+          });
+        },
+        { data, sessionKey }
+      );
+    await emitTool({
+      phase: 'start',
+      toolCallId: 'live-command',
+      name: 'exec',
+      args: { command: 'echo hello' },
+    });
+    const liveCard = historyCards.filter({ hasText: 'echo hello' });
+    await liveCard.waitFor();
+    assert.equal(
+      await liveCard.locator('.tool-card-header').getAttribute('aria-expanded'),
+      'false'
+    );
+    await liveCard.locator('.tool-status-pill.running').waitFor();
+    assert.equal(await liveCard.locator('.tool-card-body').count(), 0);
+    await emitTool({
+      phase: 'update',
+      toolCallId: 'live-command',
+      partialResult: { content: [{ type: 'text', text: 'LIVE_PARTIAL_OUTPUT' }] },
+    });
+    await liveCard.locator('.tool-status-pill.running').waitFor();
+    assert.equal(await liveCard.locator('.tool-card-body').count(), 0);
+    await liveCard.locator('.tool-card-header').click();
+    await liveCard
+      .locator('.tool-output-content')
+      .filter({ hasText: 'LIVE_PARTIAL_OUTPUT' })
+      .waitFor();
+    await emitTool({
+      phase: 'result',
+      toolCallId: 'live-command',
+      result: { content: [{ type: 'text', text: 'LIVE_FINAL_OUTPUT' }], details: { exitCode: 0 } },
+    });
+    await liveCard.locator('.tool-status-pill.success').waitFor();
+    await liveCard
+      .locator('.tool-output-content')
+      .filter({ hasText: 'LIVE_FINAL_OUTPUT' })
+      .waitFor();
+    assert.equal(
+      await liveCard.locator('.tool-card-header').getAttribute('aria-expanded'),
+      'true',
+      'Manual expansion survives updates'
+    );
+    assert.equal(await liveCard.count(), 1, 'Tool updates reuse the call ID');
+    await liveCard.locator('.tool-card-header').click();
+    await emitTool({
+      phase: 'result',
+      toolCallId: 'failed-command',
+      name: 'exec',
+      isError: true,
+      result: 'Command failed',
+    });
+    const failedCard = historyCards.filter({ hasText: 'failed' });
+    await failedCard.locator('.tool-status-pill.error').waitFor();
+    assert.equal(await failedCard.locator('.tool-card-body').count(), 0);
+    await emitTool(
+      { phase: 'start', toolCallId: 'other-session', name: 'SHOULD_NOT_APPEAR' },
+      'other'
+    );
+    assert.equal(await tools.getByText('SHOULD_NOT_APPEAR').count(), 0);
+    await tools.evaluate(() => window.testFinishRun('test-run'));
+    await tools.getByRole('button', { name: 'Send message', exact: true }).waitFor();
+    await tools.close();
+
     const tracked = await openApp(browser, { manualRunCompletion: true });
     const trackedComposer = tracked.getByRole('textbox', {
       name: 'Message Assistant',
