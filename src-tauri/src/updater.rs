@@ -42,7 +42,9 @@ pub async fn check_for_update(
     state: State<'_, UpdateState>,
 ) -> Result<Option<UpdateInfo>, String> {
     if crate::distribution::current().mode == crate::distribution::Mode::Msix {
-        return Err("MSIX updates are managed by Microsoft Store or your MSIX distribution source.".into());
+        return Err(
+            "MSIX updates are managed by Microsoft Store or your MSIX distribution source.".into(),
+        );
     }
     let mut pending = state
         .0
