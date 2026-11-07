@@ -15,8 +15,6 @@ jobs:
     timeout-minutes: 45
     env:
       YAOC_UPDATER_PUBLIC_KEY: ${{ vars.YAOC_UPDATER_PUBLIC_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     permissions:
       contents: write
     steps:
@@ -61,7 +59,11 @@ jobs:
         env:
           YAOC_TEST_OFFICIAL: '1'
       - run: npm run notices
-      - run: npm run package:installers
+      - name: Package installers and sign updates
+        run: npm run package:installers
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Create draft for manual testing and publication
         shell: pwsh
         env:

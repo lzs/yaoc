@@ -63,7 +63,7 @@ The password is supplied to the signing tool through this process's environment;
 npm.cmd run release:package
 ```
 
-The release:package command checks the signing environment, adds the Cargo and LLVM-MinGW tools to its child PATH, and runs check, release, notices and package:installers in order. It stops on the first failure, builds both architectures, and uses the current base version (2026.1.0 at present). It does not tag or publish anything. Keep the signing variables loaded until it finishes.
+The release:package command checks the signing environment, adds the Cargo and LLVM-MinGW tools to its child PATH, and runs check, release, notices and package:installers in order. It stops on the first failure, builds both architectures, and uses the current base version. It does not tag or publish anything. Keep the signing variables loaded until it finishes.
 
 After signing, clear the password from the shell environment:
 
@@ -77,6 +77,27 @@ YAOC does not use Windows Authenticode signing. The owner has chosen not to obta
 The custom NSIS template captures the exact bundle-type-patched application payload before Tauri restores its input. Packaging promotes that payload to the target executable and portable outputs, then hashes it. A verified pristine backup allows repeat packaging. Tauri generates detached updater signatures for the completed combined installer.
 
 package:installers generates installer-update.json for official builds from the combined installer .sig file, mapping both Windows architectures to the same URL and signature. Publish both portable ZIPs, the combined installer, its .sig file, installer-update.json, SHA256SUMS.txt, LICENSE and THIRD_PARTY_LICENSES.txt together as an immutable non-prerelease GitHub release tagged v<version>. Never publish Beta artifacts as official updates. No Tauri private signing identity is supplied by this repository.
+
+## GitHub Actions signing
+
+The manual `Build official release draft` workflow builds native x64 and ARM64 executables, packages the combined NSIS installer, and creates a draft GitHub Release. It never publishes the draft automatically. It uses the current base version; bump matching manifests and lockfiles before starting work toward a new release.
+
+Configure the repository's `release` environment under Settings > Environments:
+
+- Allow only the `main` branch and require approval from the release owner. A solo maintainer must be allowed to approve their own run.
+- Set the environment variable `YAOC_UPDATER_PUBLIC_KEY` to the contents of `yaoc-tauri-updater.key.pub`.
+- Set the environment secret `TAURI_SIGNING_PRIVATE_KEY` to the contents of the existing `yaoc-tauri-updater.key`, not its local path.
+- Set the environment secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to that key's password. Never put the password in a workflow input, source file, or command-line argument.
+
+GitHub Actions cannot securely prompt for a password during a running job. Approval authorizes the job to use its stored secrets; it does not supply the password. The private key and password are exposed only to the installer packaging/signing step, while the public key is available during compilation. Code executed by the signing step can access its secrets, so review release code and dependency changes before approval. Keep the same key pair securely backed up outside GitHub.
+
+To create an official draft explicitly:
+
+```powershell
+gh workflow run release.yml --repo lzs/yaoc --ref main
+```
+
+Approve the pending `release` environment request on the run page. Verify the draft's artifacts before manually publishing it. To keep the key password off GitHub, use the local signing procedure above instead and upload the completed signed artifacts; do not trigger this workflow without its required signing configuration.
 
 ## Native acceptance checks
 
