@@ -89,6 +89,8 @@ Configure the repository's `release` environment under Settings > Environments:
 - Set the environment secret `TAURI_SIGNING_PRIVATE_KEY` to the contents of the existing `yaoc-tauri-updater.key`, not its local path.
 - Set the environment secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to that key's password. Never put the password in a workflow input, source file, or command-line argument.
 
+The `main` branch requires pull requests with owner approval from non-admin contributors, dismisses stale approvals after new commits, and blocks force pushes and deletion. `.github/CODEOWNERS` assigns all files to `@lzs`, including workflow files and other inputs executed during signing. The owner retains the administrator override for solo maintenance, so their direct pushes do not require a separate pull-request approval. The release environment still requires approval even for owner-triggered releases. The owner can change repository protections; these controls do not protect against compromise of the owner account.
+
 GitHub Actions cannot securely prompt for a password during a running job. Approval authorizes the job to use its stored secrets; it does not supply the password. The private key and password are exposed only to the installer packaging/signing step, while the public key is available during compilation. Code executed by the signing step can access its secrets, so review release code and dependency changes before approval. Keep the same key pair securely backed up outside GitHub.
 
 To create an official draft explicitly:
