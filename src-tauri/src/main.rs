@@ -328,6 +328,7 @@ pub struct GatewayState {
     mock_session_models: Mutex<HashMap<String, String>>,
     mock_session_thinking: Mutex<HashMap<String, String>>,
     mock_session_labels: Mutex<HashMap<String, String>>,
+    mock_session_pins: Mutex<HashMap<String, u64>>,
 }
 
 impl GatewayState {
@@ -370,6 +371,7 @@ impl GatewayState {
             mock_session_models: Mutex::new(HashMap::new()),
             mock_session_thinking: Mutex::new(HashMap::new()),
             mock_session_labels: Mutex::new(HashMap::new()),
+            mock_session_pins: Mutex::new(HashMap::new()),
         }
     }
 
@@ -1128,8 +1130,9 @@ async fn handle_mock_request(
             let overrides = state.mock_session_models.lock().await;
             let thinking = state.mock_session_thinking.lock().await;
             let labels = state.mock_session_labels.lock().await;
+            let pins = state.mock_session_pins.lock().await;
             let mut keys: Vec<String> = overrides.keys().cloned().collect();
-            for key in thinking.keys().chain(labels.keys()) {
+            for key in thinking.keys().chain(labels.keys()).chain(pins.keys()) {
                 if !keys.contains(key) {
                     keys.push(key.clone());
                 }
@@ -1143,7 +1146,7 @@ async fn handle_mock_request(
                 let (provider, model) = model_ref.split_once('/').unwrap_or(("anthropic", model_ref));
                 let default_label = if key == "main" { "Primary Session" } else { key.as_str() };
                 let label = labels.get(key).map(String::as_str).unwrap_or(default_label);
-                json!({ "key": key, "agentId": "main", "label": label, "model": model, "modelProvider": provider, "thinkingLevel": thinking.get(key) })
+                json!({ "key": key, "agentId": "main", "label": label, "model": model, "modelProvider": provider, "thinkingLevel": thinking.get(key), "pinned": pins.contains_key(key), "pinnedAt": pins.get(key) })
             }).collect();
             Ok(json!({ "sessions": sessions }))
         }
@@ -1152,6 +1155,14 @@ async fn handle_mock_request(
             let mut overrides = state.mock_session_models.lock().await;
             let mut thinking = state.mock_session_thinking.lock().await;
             let mut labels = state.mock_session_labels.lock().await;
+            let mut pins = state.mock_session_pins.lock().await;
+            if let Some(value) = params.get("pinned") {
+                if value.as_bool().ok_or("Pinned must be a boolean")? {
+                    pins.entry(key.to_string()).or_insert(now_ms() as u64);
+                } else {
+                    pins.remove(key);
+                }
+            }
             if let Some(value) = params.get("label") {
                 if value.is_null() {
                     labels.remove(key);
@@ -1211,13 +1222,15 @@ async fn handle_mock_request(
                         "thinkingLevel": thinking.get(key),
                         "model": model,
                         "modelProvider": provider,
-                        "label": labels.get(key)
+                        "label": labels.get(key),
+                        "pinned": pins.contains_key(key),
+                        "pinnedAt": pins.get(key)
                     }
                 }
             });
             let _ = app.emit("gateway:event", patch_frame);
             Ok(
-                json!({ "ok": true, "key": key, "entry": { "label": labels.get(key), "thinkingLevel": thinking.get(key) }, "resolved": { "model": model, "modelProvider": provider } }),
+                json!({ "ok": true, "key": key, "entry": { "label": labels.get(key), "thinkingLevel": thinking.get(key), "pinned": pins.contains_key(key), "pinnedAt": pins.get(key) }, "resolved": { "model": model, "modelProvider": provider } }),
             )
         }
         "sessions.subscribe" => Ok(json!({ "subscribed": true })),
@@ -1226,6 +1239,7 @@ async fn handle_mock_request(
             state.mock_session_models.lock().await.remove(key);
             state.mock_session_thinking.lock().await.remove(key);
             state.mock_session_labels.lock().await.remove(key);
+            state.mock_session_pins.lock().await.remove(key);
             Ok(json!({ "ok": true, "key": key }))
         }
         "sessions.reset" => Ok(json!({

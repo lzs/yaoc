@@ -15,6 +15,11 @@ const modelModule = { exports: {} };
 vm.runInNewContext(compile(fs.readFileSync('src/models.ts', 'utf8')), {
   exports: modelModule.exports,
 });
+const pinModule = { exports: {} };
+vm.runInNewContext(compile(fs.readFileSync('src/sessionPins.ts', 'utf8')), {
+  exports: pinModule.exports,
+  require: (name) => (name === './models' ? modelModule.exports : {}),
+});
 let slots = [],
   cursor = 0,
   effects = [],
@@ -107,13 +112,14 @@ const source = fs
 const renderStart = source.indexOf('\n  return (', source.indexOf('export default function App()'));
 const testSource =
   source.slice(0, renderStart) +
-  `  return { setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint, handleResetSession, handleSaveWorkspaceFile, loadWorkspaceFile, fetchSessionsAndSyncSelection, setActiveFileName, setFileContent, setSavedFileContent, fileContent, savedFileContent, savedFileHash, activeFileName, fileStatusMsg, loadingFile, selectedAgentId, focusComposerInput, composerInputRef, settingsTab, showProfileModal }; }`;
+  `  return { handleToggleSessionPin, sessionPinError, pinningSessions, setConnStatus, setComposerText, setPendingAttachments, handleSelectSession, handleSendMessage, handleAbortRun, handleCreateSession, setNewSessionKeyInput, composerText, pendingAttachments, isStreaming, messages, streamingSessionKeys, setSessions, selectedSessionKey, setShowProfileModal, setShowQuitConfirmModal, setIsRecordingHotkey, sessions, setSelectedAgentId, profiles, setProfiles, activeProfileId, setActiveProfileId, sanitizePairingRequestId, sanitizeDeviceId, sanitizeImagePreviewUrl, extractMessageAttachments, isUnencryptedRemoteGatewayEndpoint, handleResetSession, handleSaveWorkspaceFile, loadWorkspaceFile, fetchSessionsAndSyncSelection, setActiveFileName, setFileContent, setSavedFileContent, fileContent, savedFileContent, savedFileHash, activeFileName, fileStatusMsg, loadingFile, selectedAgentId, focusComposerInput, composerInputRef, settingsTab, showProfileModal }; }`;
 const exportsObject = {};
 vm.runInNewContext(compile(testSource), {
   exports: exportsObject,
   require(name) {
     if (name === 'react') return hooks;
     if (name === './models') return modelModule.exports;
+    if (name === './sessionPins') return pinModule.exports;
     if (name === './runCompletion') return runModule.exports;
     if (name === './theme') return { loadTheme: () => 'dark' };
     return {};

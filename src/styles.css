@@ -3157,3 +3157,32 @@ textarea {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.session-pin-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-accent);
+}
+.session-pin-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0 10px 8px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-danger);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.session-pin-error span {
+  flex: 1;
+}
+.session-pin-error .btn {
+  padding: 2px;
+  flex-shrink: 0;
+}
+.session-popup-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

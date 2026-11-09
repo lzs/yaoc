@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Moon,
   Plus,
+  Pin,
   RefreshCw,
   Search,
   Settings,
@@ -23,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AgentInfo, SessionInfo, WorkspaceFileEntry } from './types';
+import { isSessionPinned, sortPinnedSessions } from './sessionPins';
 
 export type QuickSwitcherMode = 'search' | 'command';
 
@@ -307,7 +309,7 @@ export default function QuickSwitcher({
 
   // Build sessions list
   const sessionItems: SwitcherItem[] = useMemo(() => {
-    return sessions.map((s) => {
+    return sortPinnedSessions(sessions).map((s) => {
       const isCurrent = s.key === selectedSessionKey;
       const label = s.label || s.displayName || s.derivedTitle || s.key;
       return {
@@ -316,7 +318,7 @@ export default function QuickSwitcher({
         title: label,
         subtitle: s.agentId ? `Agent: ${s.agentId} • ${s.key}` : s.key,
         badge: isCurrent ? 'current' : undefined,
-        icon: <MessageSquare size={16} />,
+        icon: isSessionPinned(s) ? <Pin size={16} /> : <MessageSquare size={16} />,
         onSelect: () => {
           onClose();
           onSelectSession(s.key);

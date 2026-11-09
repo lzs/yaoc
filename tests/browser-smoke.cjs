@@ -258,6 +258,23 @@ async function openApp(browser, options = {}) {
             })),
           };
         if (method === 'sessions.patch') {
+          if ('pinned' in params) {
+            if (options.rejectPins) throw new Error(options.rejectPins);
+            if (options.deferPins) {
+              await new Promise((resolve, reject) => {
+                window.testResolvePin = resolve;
+                window.testRejectPin = reject;
+              });
+            }
+            const normalize = (key) => (key.startsWith('agent:') ? key : 'agent:main:' + key);
+            const row = window.testSessionRows?.find(
+              (session) => normalize(session.key) === params.key
+            );
+            if (!row) return { ok: false, error: { message: 'Session not found' } };
+            row.pinned = params.pinned;
+            row.pinnedAt = params.pinned ? row.pinnedAt || Date.now() : undefined;
+            return { ok: true, key: params.key, entry: { ...row } };
+          }
           if ('label' in params && options.rejectSessionLabel) {
             return { ok: false, error: { message: 'Label denied by fixture' } };
           }
@@ -312,6 +329,8 @@ async function openApp(browser, options = {}) {
   try {
     await require('./conversation-find-browser.cjs')(browser, openApp, root);
     if (process.env.YAOC_TEST_FIND_ONLY === '1') return;
+    await require('./session-pins-browser.cjs')(browser, openApp, root);
+    if (process.env.YAOC_TEST_PINS_ONLY === '1') return;
     {
       const updates = await openApp(browser, {
         sessionRows: [

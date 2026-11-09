@@ -32,6 +32,8 @@ export interface SessionInfo extends ThinkingMetadata {
   key: string;
   agentId: string;
   sessionId?: string;
+  pinned?: boolean;
+  pinnedAt?: number;
   label?: string | null;
   displayName?: string | null;
   derivedTitle?: string | null;

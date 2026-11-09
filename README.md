@@ -11,7 +11,7 @@ YAOC is a small, lightweight, self-contained desktop client designed to have ver
 - Multiple Gateway profiles, device pairing, and cached device tokens.
 - Streaming chat, reasoning traces, tool activity, and execution approvals.
 - Image and file attachments through paste, drag-and-drop, or the attachment button.
-- Agent/session switching, model selection, Gateway-advertised reasoning choices, and session actions.
+- Agent/session switching, Gateway-synced session pins, model selection, Gateway-advertised reasoning choices, and session actions.
 - Gateway workspace browsing and editing, where the Gateway exposes those methods.
 - Dark/light/system themes, resizable panels, a system tray icon, and a configurable global shortcut (default **Alt+Shift+3**).
 - Automatic Windows background efficiency mode while unfocused, minimized, or hidden in the tray.

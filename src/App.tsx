@@ -16,6 +16,8 @@ import {
   MoreHorizontal,
   Plus,
   Pencil,
+  Pin,
+  PinOff,
   Play,
   Plug,
   RefreshCw,
@@ -63,6 +65,12 @@ import KeyboardShortcuts from './KeyboardShortcuts';
 import SessionTokenMeter from './SessionTokenMeter';
 import ChatActionButton from './ChatActionButton';
 import ConversationFind from './ConversationFind';
+import {
+  changeSessionPin,
+  isSessionPinned,
+  sessionPinPatch,
+  sortPinnedSessions,
+} from './sessionPins';
 import TitleBar from './TitleBar';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
@@ -617,6 +625,14 @@ export default function App() {
   const [renamingSessionKey, setRenamingSessionKey] = useState<string | null>(null);
   const [renameSessionInput, setRenameSessionInput] = useState<string>('');
   const [refreshingSessions, setRefreshingSessions] = useState<boolean>(false);
+  const [pinningSessions, setPinningSessions] = useState<Set<string>>(() => new Set());
+  const pinRequestsRef = useRef(new Set<string>());
+  const [sessionPinError, setSessionPinError] = useState('');
+  useEffect(() => {
+    pinRequestsRef.current.clear();
+    setPinningSessions(new Set());
+    setSessionPinError('');
+  }, [activeProfileId, selectedAgentId, connStatus.state]);
   const [chatAction, setChatAction] = useState<'reload' | 'reset' | null>(null);
   const chatActionInFlight = useRef(false);
 
@@ -1502,9 +1518,10 @@ export default function App() {
                 ...(hasThinking ? { thinkingLevel } : {}),
                 ...(label !== undefined ? { label } : {}),
                 ...sessionThinkingMetadata(match, undefined),
+                ...sessionPinPatch(match),
               };
             });
-            return updated ? next : prev;
+            return updated ? sortPinnedSessions(next) : prev;
           });
         }
 
@@ -1853,11 +1870,13 @@ export default function App() {
 
     if (!isCurrent()) return null;
     if (Array.isArray(sessRes?.sessions)) {
-      const list: SessionInfo[] = normalizeSessions(
-        sessRes.sessions.length > 0
-          ? sessRes.sessions
-          : [{ key: 'main', agentId: currentAgent, label: 'Primary Session' }],
-        currentAgent
+      const list: SessionInfo[] = sortPinnedSessions(
+        normalizeSessions(
+          sessRes.sessions.length > 0
+            ? sessRes.sessions
+            : [{ key: 'main', agentId: currentAgent, label: 'Primary Session' }],
+          currentAgent
+        )
       );
 
       const withThinking = list.map((session) => ({
@@ -3024,6 +3043,67 @@ export default function App() {
     }
   }
 
+  function pinOperationKey(session: SessionInfo) {
+    const scope = captureGatewayScope(session.agentId || selectedAgentId);
+    return JSON.stringify([
+      scope.profileId,
+      scope.agentId,
+      scope.generation,
+      toGatewaySessionKey(scope.agentId, session.key),
+    ]);
+  }
+
+  async function handleToggleSessionPin(session: SessionInfo) {
+    const api = window.openclawApi;
+    const scope = captureGatewayScope(session.agentId || selectedAgentId);
+    if (!api || connStatus.state !== 'connected' || !isGatewayScopeCurrent(scope)) return;
+    const operation = pinOperationKey(session);
+    if (pinRequestsRef.current.has(operation)) return;
+    const gatewayKey = toGatewaySessionKey(scope.agentId, session.key);
+    const pinned = !isSessionPinned(session);
+    pinRequestsRef.current.add(operation);
+    setPinningSessions(new Set(pinRequestsRef.current));
+    setSessionPinError('');
+    // A list sampled before this write must not overwrite its confirmed result.
+    ++sessionListSeqRef.current;
+    try {
+      const confirmed = await changeSessionPin(
+        api.request,
+        { ...session, agentId: scope.agentId },
+        pinned
+      );
+      if (!isGatewayScopeCurrent(scope)) return;
+      ++sessionListSeqRef.current;
+      const current = sessionsRef.current.find((row) => row.key === gatewayKey);
+      if (
+        !current ||
+        (session.sessionId && current.sessionId && current.sessionId !== session.sessionId)
+      )
+        return;
+      setSessions((previous) =>
+        sortPinnedSessions(
+          previous.map((row) => (row.key === gatewayKey ? { ...row, ...confirmed } : row))
+        )
+      );
+      setSessionMenu((menu) => (menu?.sessionKey === gatewayKey ? null : menu));
+      // Read server ordering and any concurrent changes made by another client.
+      await fetchSessionsAndSyncSelection(scope.agentId, activeGatewaySessionKeyRef.current);
+    } catch (error: any) {
+      if (!isGatewayScopeCurrent(scope)) return;
+      setSessionPinError(
+        'Could not ' +
+          (pinned ? 'pin' : 'unpin') +
+          ' "' +
+          getSessionDisplayName(session) +
+          '": ' +
+          (error?.message || 'Gateway request failed.')
+      );
+    } finally {
+      pinRequestsRef.current.delete(operation);
+      setPinningSessions(new Set(pinRequestsRef.current));
+    }
+  }
+
   async function handleRenameSession(targetKey: string, newLabel: string) {
     const trimmed = newLabel.trim();
     const gatewayKey = toGatewaySessionKey(selectedAgentId, targetKey);
@@ -3378,6 +3458,20 @@ export default function App() {
             )}
           </div>
 
+          {sessionPinError && (
+            <div className="session-pin-error" role="alert">
+              <span>{sessionPinError}</span>
+              <button
+                type="button"
+                className="btn"
+                aria-label="Dismiss pin error"
+                onClick={() => setSessionPinError('')}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+
           <div className="session-list" ref={sessionListRef}>
             {sessions.map((s) => {
               const displayName = getSessionDisplayName(s);
@@ -3413,6 +3507,16 @@ export default function App() {
                     ) : null}
                   </span>
                   <div className="session-key">{displayName}</div>
+                  {isSessionPinned(s) && (
+                    <span
+                      className="session-pin-icon"
+                      role="img"
+                      aria-label="Pinned session"
+                      title="Pinned on Gateway"
+                    >
+                      <Pin size={12} aria-hidden="true" />
+                    </span>
+                  )}
                   <button
                     type="button"
                     className={`session-more-btn ${isMenuOpen ? 'open' : ''}`}
@@ -5687,6 +5791,30 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              <button
+                type="button"
+                className="session-popup-item"
+                disabled={
+                  connStatus.state !== 'connected' ||
+                  pinningSessions.has(pinOperationKey(menuSession))
+                }
+                aria-busy={pinningSessions.has(pinOperationKey(menuSession))}
+                onClick={() => void handleToggleSessionPin(menuSession)}
+              >
+                {pinningSessions.has(pinOperationKey(menuSession)) ? (
+                  <RefreshCw size={13} className="spin-icon" />
+                ) : isSessionPinned(menuSession) ? (
+                  <PinOff size={13} />
+                ) : (
+                  <Pin size={13} />
+                )}
+                {pinningSessions.has(pinOperationKey(menuSession))
+                  ? 'Saving pin…'
+                  : isSessionPinned(menuSession)
+                    ? 'Unpin Session'
+                    : 'Pin Session'}
+              </button>
 
               {isRenaming ? (
                 <div

@@ -265,3 +265,84 @@ test('Gateway-provided byte hashes are retained and save conflicts preserve draf
   assert.equal(app.view.savedFileContent, 'Original');
   assert.match(app.view.fileStatusMsg, /File changed on the Gateway/);
 });
+
+test('pin writes confirm once and preserve another selected session', async () => {
+  const app = fixture();
+  const write = deferred();
+  const rows = [
+    { key: 'agent:main:main', agentId: 'main', sessionId: 'a' },
+    { key: 'agent:main:b', agentId: 'main', sessionId: 'b' },
+  ];
+  app.view.setSessions(rows);
+  app.render();
+  let writes = 0;
+  app.api.request = (method) => {
+    if (method === 'sessions.patch') {
+      writes++;
+      return write.promise;
+    }
+    if (method === 'chat.history') return Promise.resolve({ messages: [] });
+    return Promise.resolve({ sessions: rows });
+  };
+  const pending = app.view.handleToggleSessionPin(rows[0]);
+  await app.view.handleToggleSessionPin(rows[0]);
+  app.render();
+  assert.equal(writes, 1);
+  assert.equal(app.view.sessions[0].pinned, undefined);
+  app.view.handleSelectSession('b');
+  app.render();
+  rows[0] = { ...rows[0], pinnedAt: 100 };
+  write.resolve({ ok: true, entry: { pinnedAt: 100 } });
+  await pending;
+  app.render();
+  assert.equal(app.view.selectedSessionKey, 'agent:main:b');
+  assert.equal(app.view.sessions[0].pinnedAt, 100);
+  assert.equal(app.view.sessionPinError, '');
+});
+
+test('pin completions cannot affect a switched profile, agent or connection', async () => {
+  for (const change of ['profile', 'agent', 'connection']) {
+    for (const failed of [false, true]) {
+      const app = fixture();
+      app.initStatus();
+      const write = deferred();
+      const row = { key: 'agent:main:main', agentId: 'main' };
+      app.view.setSessions([row]);
+      app.render();
+      app.api.request = () => write.promise;
+      const pending = app.view.handleToggleSessionPin(row);
+      if (change === 'profile') app.view.setActiveProfileId('other');
+      else if (change === 'agent') app.view.setSelectedAgentId('other');
+      else app.status({ state: 'disconnected' });
+      app.render();
+      if (failed) write.reject(new Error('Old connection denied the pin'));
+      else write.resolve({ ok: true, entry: { pinnedAt: 100 } });
+      await pending;
+      app.render();
+      assert.equal(app.view.sessions[0].pinnedAt, undefined);
+      assert.equal(app.view.sessionPinError, '');
+    }
+  }
+});
+
+test('a session list sampled before a pin cannot overwrite the acknowledged pin', async () => {
+  const app = fixture();
+  const oldList = deferred();
+  const row = { key: 'agent:main:main', agentId: 'main' };
+  app.view.setSessions([row]);
+  app.render();
+  let lists = 0;
+  app.api.request = (method) => {
+    if (method === 'sessions.patch') return Promise.resolve({ ok: true, entry: { pinnedAt: 100 } });
+    return ++lists === 1
+      ? oldList.promise
+      : Promise.resolve({ sessions: [{ ...row, pinnedAt: 100 }] });
+  };
+  const refresh = app.view.fetchSessionsAndSyncSelection('main', 'main');
+  await app.view.handleToggleSessionPin(row);
+  app.render();
+  oldList.resolve({ sessions: [row] });
+  await refresh;
+  app.render();
+  assert.equal(app.view.sessions[0].pinnedAt, 100);
+});
