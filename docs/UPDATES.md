@@ -24,7 +24,7 @@ The vendored NSIS template comes from tauri-cli-v2.10.1 under MIT/Apache-2.0. YA
 
 ## Build and publish
 
-Normal builds remain Beta:
+Local development builds are now called **Canary**: unsigned portable executables, without installers. Beta is reserved for requested prerelease distribution with signed executables and installers; Official is a requested stable signed release with Tauri updater signatures. See [BUILD.md](BUILD.md#build-channel-policy) for the policy and pending wrapper/badge changes. The following commands describe the existing Beta distribution packaging path:
 
 ```powershell
 npm.cmd run dist:all

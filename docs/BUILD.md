@@ -1,5 +1,19 @@
 # Building YAOC on Windows
 
+## Build channel policy
+
+The owner agreed on these channel names and defaults on 2026-11-09:
+
+| Channel  | Intended use                                                       | Signing and packaging                                                     |
+| -------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Canary   | Routine local development and testing; the default for coding work | Unsigned x64/ARM64 portable executables; no installers                    |
+| Beta     | Prerelease distribution, when requested                            | Signed executables and installers                                         |
+| Official | Explicitly requested stable release                                | Signed executables and installers, with separate Tauri updater signatures |
+
+Canary versions retain `major.minor.patch-devMMDDHHMM`. After releasing a stable patch, development moves to the next patch base (for example, released `2026.1.1` → development `2026.1.2-dev…`). The channel badge is separate from this version string.
+
+**Pending implementation:** the current app badge still reports Beta / Testing and the local build wrapper still packages installers by default. The policy above records the intended behavior; it does not mean those code changes are complete. For Canary work, skip Authenticode and installer packaging, preserve local-only output, and stage both unsigned portable executables using `package:portable` with the existing three-generation backup rotation. Adapt the local wrapper before relying on it for this path. The older Beta descriptions and commands below describe the existing implementation.
+
 ## Requirements
 
 - Windows 10/11 x64 for the documented build environment.
