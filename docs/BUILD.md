@@ -105,7 +105,7 @@ Keep test builds in Beta until native validation is complete. On Windows 11 ARM6
 
 Use a dedicated test session and disposable workspace file for real-Gateway testing: pairing/reconnect, streaming and stop, attachments, approvals, model/reasoning changes, and workspace save/load. Also switch sessions while Reset is pending, and switch files or reconnect while Save is pending; completion must not replace another transcript, saved baseline, or Gateway's data. Native ARM64 and real-Gateway checks require manual validation when the build machine cannot provide them.
 
-After validation, explicitly build the official version, regenerate notices, package both architectures, verify `SHA256SUMS.txt`, and publish the intended commits and artifacts. Official packaging requires Tauri updater signing configuration; see UPDATES.md. Windows Authenticode is deliberately not used for either official or Beta builds. Beta artifacts and official artifacts must not be mixed.
+After validation, explicitly build the official version, regenerate notices, package both architectures, verify `SHA256SUMS.txt`, and publish the intended commits and artifacts. Official packaging requires Tauri updater signing configuration; see UPDATES.md. For Certum Authenticode signing, connect SimplySign Desktop and add -Sign to the local build command; see UPDATES.md. This signs both native payloads and the combined installer before ZIPs, updater signatures, and checksums are finalized. Beta artifacts and official artifacts must not be mixed.
 
 ## Maintaining icons
 

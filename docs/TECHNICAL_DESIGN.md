@@ -461,6 +461,8 @@ One combined per-user NSIS installer (`yaoc-setup.exe`) embeds both native build
 
 Only installed mode downloads/installs updates through tauri-plugin-updater with mandatory installer signatures. Portable mode reports official releases and opens the manual download page. The old portable replacement and signing protocol are removed. The renderer blocks installer restart while work is unsaved or active.
 
+Optional Certum Authenticode signing is enabled by the local build switch `-Sign` (or `YAOC_AUTHENTICODE_THUMBPRINT` for direct packaging). Tauri signs each patched payload, NSIS plugins, uninstaller, and completed installer. The capture hook verifies the payload signature and timestamp before embedding; packaging verifies installers and portable inputs before ZIP/checksum generation. Tauri updater signatures cover the final Authenticode-signed installer bytes and remain a separate identity. Unsigned local/CI packaging remains supported.
+
 The pinned custom NSIS template preserves all shared data and unrelated files, removes the data-deletion UI, and checks executable locks by installation path. Installer hooks create metadata and own installed toast registration; portable mode uses registry-only native WinRT toast registration under its own identity, with no shortcut writes. See [UPDATES.md](UPDATES.md) for packaging, signing, recovery limits and native validation.
 
 ### MSIX distribution

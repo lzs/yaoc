@@ -17,6 +17,10 @@ test(
         path.join(__dirname, '../scripts/package-portable.cjs'),
         path.join(root, 'scripts/package-portable.cjs')
       );
+      fs.copyFileSync(
+        path.join(__dirname, '../scripts/windows-signing.cjs'),
+        path.join(root, 'scripts/windows-signing.cjs')
+      );
       const notices = {
         LICENSE: 'Project license fixture',
         'THIRD_PARTY_LICENSES.txt': 'Third-party notice fixture',
@@ -41,7 +45,7 @@ test(
         const packaged = cp.spawnSync(
           process.execPath,
           [path.join(root, 'scripts/package-portable.cjs')],
-          { encoding: 'utf8' }
+          { encoding: 'utf8', env: { ...process.env, YAOC_AUTHENTICODE_THUMBPRINT: '' } }
         );
         assert.equal(
           packaged.status,

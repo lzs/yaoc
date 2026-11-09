@@ -72,7 +72,19 @@ Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 Remove-Variable yaocKeyPassword
 ```
 
-YAOC does not use Windows Authenticode signing. The owner has chosen not to obtain a certificate or signing service. Application executables and installers have no Windows publisher signature; Windows may display an unknown publisher or SmartScreen warning. This does not prevent distribution or Tauri updater signature verification. Official packaging requires only the Tauri updater public/private key configuration, not a certificate.
+YAOC supports optional Windows Authenticode signing with the owner's Certum Code Signing in the Cloud certificate. Install SimplySign Desktop and Windows SDK Signing Tools for Desktop Apps, then connect SimplySign Desktop using the phone app before building. From the network source checkout, run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1 -Sign
+```
+
+This builds a signed Beta in the local workspace, automatically selecting the single valid code-signing certificate and finding SignTool. If multiple certificates exist, add `-CertificateThumbprint "YOUR_CERTIFICATE_THUMBPRINT"`. An official build still requires an explicit request and the separate Tauri updater signing environment above. The certificate thumbprint is public; SimplySign tokens and PINs stay in its apps and are never stored in source.
+
+For direct local packaging, set `YAOC_AUTHENTICODE_THUMBPRINT` to the certificate thumbprint and optionally `TAURI_WINDOWS_SIGNTOOL_PATH` to an explicit SignTool path before `npm.cmd run package:installers`. Tauri signs each application after its bundle marker is patched, signs NSIS plugins and the uninstaller, and signs the installer before generating detached updater signatures. The capture hook verifies the application signature and timestamp before embedding it. Packaging verifies installers and both portable payloads before creating ZIPs and checksums; a failed signature or missing timestamp stops packaging. Do not sign distributed files afterward, as that invalidates checksums and detached updater signatures.
+
+Without `-Sign` or `YAOC_AUTHENTICODE_THUMBPRINT`, existing unsigned build/CI workflows remain available. Authenticode does not replace Tauri updater signing and does not guarantee immediate SmartScreen reputation. MSIX bundle signing remains separate; its manifest publisher must match the certificate subject.
+
+References: [Certum SimplySign setup](https://support.certum.eu/en/installation-of-the-simplysign-applications/), [Certum signing guide](https://files.certum.eu/documents/manual_en/CS-Code_Signing_in_the_Cloud_Signtool_jarsigner_signing.pdf), [Microsoft SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool).
 
 The custom NSIS template captures the exact bundle-type-patched application payload before Tauri restores its input. Packaging promotes that payload to the target executable and portable outputs, then hashes it. A verified pristine backup allows repeat packaging. Tauri generates detached updater signatures for the completed combined installer.
 

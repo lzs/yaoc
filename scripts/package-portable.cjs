@@ -22,6 +22,7 @@ try {
   }
   for (const { source } of sources)
     if (!fs.statSync(source).isFile()) throw new Error(`Missing build: ${source}`);
+  for (const { source } of sources) require('./windows-signing.cjs').verifySignedFile(source);
   fs.mkdirSync(release, { recursive: true });
   fs.mkdirSync(archive, { recursive: true });
   const inUse = path.join(archive, '.in-use');

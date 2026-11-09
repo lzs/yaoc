@@ -12,4 +12,5 @@ if (
 const bytes = fs.readFileSync(source);
 if (!bytes.includes(Buffer.from('__TAURI_BUNDLE_TYPE_VAR_NSS')))
   throw new Error('NSIS bundle marker is missing');
+require('./windows-signing.cjs').verifySignedFile(source);
 fs.writeFileSync(source + '.nsis-payload.exe', bytes);

@@ -51,3 +51,17 @@ test('installer packaging passes the runtime public key to Tauri without exposin
   assert(!JSON.stringify(config).includes('password-fixture'));
   assert.equal(installerConfig({}).bundle.createUpdaterArtifacts, false);
 });
+
+test('Authenticode config is optional, validates certificate selection, and uses RFC3161 SHA256 timestamps', () => {
+  const { installerConfig } = require('../scripts/installer-config.cjs');
+  assert.deepEqual(installerConfig({}).bundle.windows, {});
+  const thumbprint = 'a'.repeat(40);
+  const config = installerConfig({ YAOC_AUTHENTICODE_THUMBPRINT: ' ' + thumbprint + ' ' });
+  assert.deepEqual(config.bundle.windows, {
+    certificateThumbprint: thumbprint.toUpperCase(),
+    digestAlgorithm: 'sha256',
+    timestampUrl: 'http://time.certum.pl',
+    tsp: true,
+  });
+  assert.throws(() => installerConfig({ YAOC_AUTHENTICODE_THUMBPRINT: 'invalid' }), /thumbprint/);
+});

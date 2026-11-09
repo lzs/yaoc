@@ -54,7 +54,7 @@ try {
     fs.copyFileSync(exe, pristine);
     const inputHash = hash(exe);
     fs.rmSync(exe + '.nsis-payload.exe', { force: true });
-    // Capture the bundle-type-patched payload; Windows Authenticode is not used.
+    // Tauri signs after patching; capture those exact signed payload bytes.
     const config = installerConfig();
     // Only the final combined installer is an updater artifact.
     if (arch === 'arm64') config.bundle.createUpdaterArtifacts = false;
@@ -74,6 +74,7 @@ try {
     const directory = path.join(root, 'src-tauri/target', triple, 'release/bundle/nsis');
     const source = path.join(directory, 'YAOC_' + version + '_' + arch + '-setup.exe');
     if (!fs.existsSync(source)) throw new Error('Missing NSIS installer for ' + arch);
+    require('./windows-signing.cjs').verifySignedFile(source);
     if (arch === 'x64') {
       const destination = path.join(root, 'release', 'yaoc-setup.exe');
       fs.copyFileSync(source, destination);
