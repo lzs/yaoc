@@ -40,6 +40,7 @@ For an offline preview, select **Built-in Demo Gateway (Offline Test)** and conn
 
 These are good places to start exploring:
 
+- **Ctrl+F** finds text in the loaded conversation, including code blocks. Use Enter / Shift+Enter to move between matches and Esc to close.
 - **Ctrl+P** opens the **Quick Switcher** to find sessions across agents and search workspace files. Type part of a name to jump straight to it.
 - **Ctrl+Shift+P** opens the **Command Palette**. Browse or search actions such as switching agents, changing themes, managing connections, and showing the workspace editor.
 - **Ctrl+/** opens the full **keyboard shortcut reference** in Settings. You can also click **Shortcuts** at the bottom of the sidebar.

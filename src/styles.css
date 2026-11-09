@@ -3106,3 +3106,54 @@ textarea {
   padding-left: 96px;
   padding-right: 16px;
 }
+
+/* Conversation search paints ranges without changing message markup. */
+::highlight(yaoc-find) {
+  background-color: #fde68a;
+  color: #172033;
+}
+::highlight(yaoc-find-current) {
+  background-color: #f97316;
+  color: #111827;
+}
+.conversation-find {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+}
+.conversation-find .input-field {
+  flex: 1 1 100px;
+  width: 0;
+  min-width: 80px;
+  padding: 5px 8px;
+}
+.conversation-find-count {
+  font-size: 11px;
+  white-space: nowrap;
+  min-width: 62px;
+  text-align: center;
+}
+.conversation-find-actions {
+  display: flex;
+  gap: 3px;
+}
+.conversation-find-actions .btn {
+  padding: 5px;
+}
+
+.conversation-find-scope {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

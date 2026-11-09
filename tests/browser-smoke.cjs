@@ -310,6 +310,8 @@ async function openApp(browser, options = {}) {
       : {}),
   });
   try {
+    await require('./conversation-find-browser.cjs')(browser, openApp, root);
+    if (process.env.YAOC_TEST_FIND_ONLY === '1') return;
     {
       const updates = await openApp(browser, {
         sessionRows: [

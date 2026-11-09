@@ -3,6 +3,11 @@ const groups = [
     title: 'Find and explore',
     shortcuts: [
       [
+        'Find in conversation',
+        'Ctrl+F',
+        'Search loaded message text and code. Enter / Shift+Enter or F3 / Shift+F3 moves between matches; Esc closes find.',
+      ],
+      [
         'Find sessions and workspace files',
         'Ctrl+P',
         'Jump to another conversation or open a workspace file.',

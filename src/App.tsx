@@ -20,6 +20,7 @@ import {
   Plug,
   RefreshCw,
   RotateCcw,
+  Search,
   Save,
   Settings,
   ShieldAlert,
@@ -61,6 +62,7 @@ import { RunCompletionTracker } from './runCompletion';
 import KeyboardShortcuts from './KeyboardShortcuts';
 import SessionTokenMeter from './SessionTokenMeter';
 import ChatActionButton from './ChatActionButton';
+import ConversationFind from './ConversationFind';
 import TitleBar from './TitleBar';
 
 const YAOC_ICON_URL = new URL('./assets/yaoc.svg', import.meta.url).href;
@@ -636,6 +638,7 @@ export default function App() {
 
   // Chat State
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [findRequest, setFindRequest] = useState(0);
   const [profileStorageError, setProfileStorageError] = useState('');
   const composerSessionKey = `${activeProfileId}:${toGatewaySessionKey(selectedAgentId, selectedSessionKey)}`;
   const [drafts, setDrafts] = useState<
@@ -663,6 +666,17 @@ export default function App() {
             : update,
       },
     }));
+  }
+  useLayoutEffect(() => {
+    setFindRequest(0);
+  }, [composerSessionKey]);
+  function openConversationFind() {
+    initialBottomLockUntilRef.current = null;
+    setFindRequest((request) => request + 1);
+  }
+  function closeConversationFind() {
+    setFindRequest(0);
+    requestAnimationFrame(() => composerInputRef.current?.focus({ preventScroll: true }));
   }
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const sessionListRef = useRef<HTMLDivElement | null>(null);
@@ -1159,6 +1173,7 @@ export default function App() {
       return;
     }
 
+    if (findRequest > 0) return;
     const lastMsg = messages[messages.length - 1];
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (lastMsg?.role === 'user' || distanceFromBottom < 150) {
@@ -2769,6 +2784,23 @@ export default function App() {
         openKeyboardShortcuts();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') {
+        if (
+          e.defaultPrevented ||
+          e.isComposing ||
+          showProfileModal ||
+          showQuitConfirmModal ||
+          lightboxImage ||
+          showQuickSwitcher ||
+          renamingSessionKey ||
+          showNewSessionInput ||
+          document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')
+        )
+          return;
+        e.preventDefault();
+        openConversationFind();
+        return;
+      }
       // Quick Switcher (Ctrl+P for search) & Command Palette (Ctrl+Shift+P for commands) — no Ctrl+K
       if (
         (e.ctrlKey || e.metaKey) &&
@@ -2833,6 +2865,7 @@ export default function App() {
     selectedAgentId,
     connStatus.state,
     showQuickSwitcher,
+    showNewSessionInput,
     settingsTab,
   ]);
 
@@ -3523,6 +3556,16 @@ export default function App() {
 
             <div className="chat-session-actions">
               <ChatActionButton
+                id="find-conversation"
+                label="Find in conversation (Ctrl+F)"
+                busyLabel="Find in conversation (Ctrl+F)"
+                busy={false}
+                disabled={false}
+                onClick={openConversationFind}
+              >
+                <Search size={13} aria-hidden="true" />
+              </ChatActionButton>
+              <ChatActionButton
                 id="reload-chat"
                 label="Reload chat"
                 busyLabel="Reloading chat…"
@@ -3554,6 +3597,23 @@ export default function App() {
               </ChatActionButton>
             </div>
           </div>
+
+          {findRequest > 0 && (
+            <ConversationFind
+              containerRef={messagesContainerRef}
+              focusRequest={findRequest}
+              enabled={
+                !showProfileModal &&
+                !showQuitConfirmModal &&
+                !lightboxImage &&
+                !showQuickSwitcher &&
+                !isRecordingHotkey &&
+                !renamingSessionKey &&
+                !showNewSessionInput
+              }
+              onClose={closeConversationFind}
+            />
+          )}
 
           {/* Pending Tool Execution Approval Prompts */}
           {approvals.length > 0 && (
