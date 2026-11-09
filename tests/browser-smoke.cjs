@@ -331,6 +331,8 @@ async function openApp(browser, options = {}) {
     if (process.env.YAOC_TEST_FIND_ONLY === '1') return;
     await require('./session-pins-browser.cjs')(browser, openApp, root);
     if (process.env.YAOC_TEST_PINS_ONLY === '1') return;
+    await require('./reset-confirmation-browser.cjs')(browser, openApp);
+    if (process.env.YAOC_TEST_RESET_ONLY === '1') return;
     {
       const updates = await openApp(browser, {
         sessionRows: [
@@ -539,6 +541,10 @@ async function openApp(browser, options = {}) {
           document.querySelector('[aria-label="Reload chat"]').getAttribute('aria-busy') === 'false'
       );
       await reset.click();
+      await page
+        .getByRole('dialog', { name: 'Reset this session?', exact: true })
+        .getByRole('button', { name: 'Reset session', exact: true })
+        .click();
       await page.waitForFunction(
         () =>
           document
@@ -572,6 +578,10 @@ async function openApp(browser, options = {}) {
       await page.locator('#reset-session-tooltip').waitFor({ state: 'visible' });
       await page.screenshot({ path: path.join(root, '.local', `chat-feedback-${theme}.png`) });
       await reset.click();
+      await page
+        .getByRole('dialog', { name: 'Reset this session?', exact: true })
+        .getByRole('button', { name: 'Reset session', exact: true })
+        .click();
       await page.waitForFunction(() => window.testActionCalls.length === 3);
       await page.evaluate(() => window.testRejectAction());
       await page

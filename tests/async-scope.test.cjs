@@ -51,7 +51,7 @@ test('reset completion preserves the newly selected session on both success and 
         ],
       });
     };
-    const pending = app.view.handleResetSession();
+    const pending = app.view.performResetSession();
     app.view.handleSelectSession('b');
     app.render();
     await app.settle();

@@ -197,7 +197,7 @@ export default function QuickSwitcher({
         id: 'cmd-clear-session',
         type: 'command',
         title: 'Reset / Clear Current Session',
-        subtitle: 'Send /reset to Gateway to start session context over',
+        subtitle: 'Confirm resetting the current conversation context',
         icon: <Trash2 size={16} />,
         onSelect: () => {
           onClose();

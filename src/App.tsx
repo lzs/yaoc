@@ -65,6 +65,7 @@ import KeyboardShortcuts from './KeyboardShortcuts';
 import SessionTokenMeter from './SessionTokenMeter';
 import ChatActionButton from './ChatActionButton';
 import ConversationFind from './ConversationFind';
+import ResetSessionDialog from './ResetSessionDialog';
 import {
   changeSessionPin,
   isSessionPinned,
@@ -750,6 +751,40 @@ export default function App() {
     null
   );
   const [showQuitConfirmModal, setShowQuitConfirmModal] = useState(false);
+  const [resetConfirmation, setResetConfirmation] = useState<{
+    gatewayKey: string;
+    name: string;
+    sessionId?: string;
+  } | null>(null);
+  const resetConfirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
+  function finishResetConfirmation(confirmed: boolean) {
+    const resolve = resetConfirmationResolver.current;
+    resetConfirmationResolver.current = null;
+    setResetConfirmation(null);
+    resolve?.(confirmed);
+  }
+  useEffect(() => {
+    finishResetConfirmation(false);
+  }, [activeProfileId, selectedAgentId, connStatus.state]);
+  useEffect(() => {
+    if (!resetConfirmation) return;
+    const target = sessions.find((row) => row.key === resetConfirmation.gatewayKey);
+    if (
+      !target ||
+      (resetConfirmation.sessionId &&
+        target.sessionId &&
+        resetConfirmation.sessionId !== target.sessionId)
+    )
+      finishResetConfirmation(false);
+  }, [sessions, resetConfirmation]);
+  useEffect(
+    () => () => {
+      const resolve = resetConfirmationResolver.current;
+      resetConfirmationResolver.current = null;
+      resolve?.(false);
+    },
+    []
+  );
   const [globalHotkey, setGlobalHotkey] = useState<string>(() => {
     const saved = loadLocalUiState();
     return typeof saved.globalHotkey === 'string' ? saved.globalHotkey : 'Alt+Shift+3';
@@ -1077,6 +1112,7 @@ export default function App() {
       lightboxImage ||
       showNewSessionInput ||
       renamingSessionKey ||
+      resetConfirmation ||
       sessionMenu
     )
       return;
@@ -1108,6 +1144,7 @@ export default function App() {
     showNewSessionInput,
     renamingSessionKey,
     sessionMenu,
+    resetConfirmation,
     connStatus.state,
   ]);
 
@@ -2514,6 +2551,19 @@ export default function App() {
     )
       return;
 
+    // Ask before clearing the composer, attaching files, or submitting a reset command.
+    if (/^\/(?:reset|new)(?:\s|$)/i.test(text)) {
+      const scope = captureGatewayScope();
+      const resetKey = activeGatewaySessionKeyRef.current;
+      if (
+        chatActionInFlight.current ||
+        !(await confirmSessionReset(resetKey)) ||
+        !isGatewayScopeCurrent(scope) ||
+        resetKey !== activeGatewaySessionKeyRef.current
+      )
+        return;
+    }
+
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -2740,7 +2790,7 @@ export default function App() {
   // In-window shortcuts: session navigation, Settings, and quit confirmation.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isRecordingHotkey) return;
+      if (isRecordingHotkey || resetConfirmation) return;
       if (
         e.ctrlKey &&
         !e.altKey &&
@@ -2886,6 +2936,7 @@ export default function App() {
     showQuickSwitcher,
     showNewSessionInput,
     settingsTab,
+    resetConfirmation,
   ]);
 
   function openKeyboardShortcuts() {
@@ -2944,7 +2995,37 @@ export default function App() {
     });
   }
 
+  function confirmSessionReset(gatewayKey: string): Promise<boolean> {
+    if (resetConfirmationResolver.current) return Promise.resolve(false);
+    const session = sessionsRef.current.find(
+      (row) => toGatewaySessionKey(row.agentId || selectedAgentId, row.key) === gatewayKey
+    );
+    setSessionMenu(null);
+    setSlashMenuOpen(false);
+    return new Promise((resolve) => {
+      resetConfirmationResolver.current = resolve;
+      setResetConfirmation({
+        gatewayKey,
+        name: session ? getSessionDisplayName(session) : gatewayKey,
+        sessionId: session?.sessionId,
+      });
+    });
+  }
+
   async function handleResetSession(targetKeyOverride?: string) {
+    if (connStatus.state !== 'connected' || !window.openclawApi || chatActionInFlight.current)
+      return;
+    const scope = captureGatewayScope();
+    const gatewayKey = toGatewaySessionKey(
+      scope.agentId,
+      targetKeyOverride || activeGatewaySessionKeyRef.current
+    );
+    setSessionMenu(null);
+    if (!(await confirmSessionReset(gatewayKey)) || !isGatewayScopeCurrent(scope)) return;
+    await runChatAction('reset', () => performResetSession(gatewayKey));
+  }
+
+  async function performResetSession(targetKeyOverride?: string) {
     const targetKey = targetKeyOverride || selectedSessionKey;
     const gatewayKey = toGatewaySessionKey(selectedAgentId, targetKey);
     const scope = captureGatewayScope();
@@ -3691,7 +3772,7 @@ export default function App() {
                 busyLabel="Resetting session…"
                 busy={chatAction === 'reset'}
                 disabled={connStatus.state !== 'connected' || chatAction === 'reload'}
-                onClick={() => void runChatAction('reset', () => handleResetSession())}
+                onClick={() => void handleResetSession()}
               >
                 <RotateCcw
                   size={13}
@@ -3713,7 +3794,8 @@ export default function App() {
                 !showQuickSwitcher &&
                 !isRecordingHotkey &&
                 !renamingSessionKey &&
-                !showNewSessionInput
+                !showNewSessionInput &&
+                !resetConfirmation
               }
               onClose={closeConversationFind}
             />
@@ -5906,6 +5988,16 @@ export default function App() {
         </div>
       )}
 
+      {resetConfirmation && (
+        <ResetSessionDialog
+          name={resetConfirmation.name}
+          sessionKey={resetConfirmation.gatewayKey}
+          fallbackFocusRef={composerInputRef}
+          onCancel={() => finishResetConfirmation(false)}
+          onConfirm={() => finishResetConfirmation(true)}
+        />
+      )}
+
       {/* Quit Confirmation Modal (Ctrl+Q) */}
       {showQuitConfirmModal && (
         <div className="modal-backdrop" onClick={() => setShowQuitConfirmModal(false)}>
@@ -6000,7 +6092,7 @@ export default function App() {
           setTheme((prev) => (prev === 'dark' ? 'light' : prev === 'light' ? 'system' : 'dark'));
         }}
         onClearSession={() => {
-          handleSendMessage('/reset');
+          void handleResetSession();
         }}
         onSelectAgent={(agentId) => {
           selectedAgentIdRef.current = agentId;
