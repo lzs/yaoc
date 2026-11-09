@@ -154,7 +154,22 @@ module.exports = async function testResetConfirmation(browser, openApp) {
 
     const palette = async () => {
       await page.keyboard.press('Control+Shift+p');
-      await page.locator('.quick-switcher-input').fill('>reset');
+      // Opening initializes the query, focus and caret in an animation frame.
+      // Filling before that frame can collapse Playwright's select-all range
+      // and append to the previous query (for example, >>resetreset).
+      await page.waitForFunction(() => {
+        const input = document.querySelector('.quick-switcher-input');
+        return (
+          input &&
+          document.activeElement === input &&
+          input.value === '>' &&
+          input.selectionStart === 1 &&
+          input.selectionEnd === 1
+        );
+      });
+      const input = page.locator('.quick-switcher-input');
+      await input.fill('>reset');
+      assert.equal(await input.inputValue(), '>reset');
       await page.getByText('Reset / Clear Current Session', { exact: true }).click();
     };
     await respond(false, 'agent:main:main', 'Primary', palette);
