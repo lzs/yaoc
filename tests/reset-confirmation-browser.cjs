@@ -38,7 +38,14 @@ module.exports = async function testResetConfirmation(browser, openApp) {
             .querySelector('[aria-label="Reset session context"]')
             .getAttribute('aria-busy') === 'false'
       );
-    const respond = async (accept, key, label, trigger, dismiss = 'button') => {
+    const respond = async (
+      accept,
+      key,
+      label,
+      trigger,
+      dismiss = 'button',
+      waitForResetBusy = false
+    ) => {
       await trigger();
       await modal.waitFor();
       assert((await modal.textContent()).includes(key));
@@ -50,11 +57,22 @@ module.exports = async function testResetConfirmation(browser, openApp) {
         true
       );
       if (accept) {
+        // Observe the action starting before testing its completion: the previous
+        // idle render can remain visible briefly after the confirmation resolves.
+        const started = waitForResetBusy
+          ? page.waitForFunction(
+              () =>
+                document
+                  .querySelector('[aria-label="Reset session context"]')
+                  .getAttribute('aria-busy') === 'true'
+            )
+          : null;
         // Duplicate events must settle the pending decision only once.
         await modal.getByRole('button', { name: 'Reset session', exact: true }).evaluate((el) => {
           el.click();
           el.click();
         });
+        if (started) await started;
       } else if (dismiss === 'escape') await page.keyboard.press('Escape');
       else if (dismiss === 'enter') await page.keyboard.press('Enter');
       else await modal.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -121,7 +139,7 @@ module.exports = async function testResetConfirmation(browser, openApp) {
     };
     await respond(false, 'agent:main:other', 'Background', background, 'escape');
     assert.equal(await resetCount(), 0);
-    await respond(true, 'agent:main:other', 'Background', background);
+    await respond(true, 'agent:main:other', 'Background', background, 'button', true);
     await page.waitForFunction(() =>
       window.testRequests.some(
         (r) => r.method === 'sessions.reset' && r.params.key === 'agent:main:other'
@@ -143,7 +161,7 @@ module.exports = async function testResetConfirmation(browser, openApp) {
     assert.equal(await resetCount(), 1);
     assert.equal(await sendCount(), 0);
     assert.equal(await composer.inputValue(), 'Keep this draft');
-    await respond(true, 'agent:main:main', 'Primary', palette);
+    await respond(true, 'agent:main:main', 'Primary', palette, 'button', true);
     await page.waitForFunction(
       () => window.testRequests.filter((r) => r.method === 'sessions.reset').length === 2
     );
