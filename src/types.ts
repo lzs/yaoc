@@ -170,7 +170,7 @@ export interface UpdateInfo {
 declare global {
   const __APP_VERSION_LABEL__: string;
   const __APP_BUILD_TIMESTAMP__: string;
-  const __APP_CHANNEL__: 'official' | 'beta';
+  const __APP_CHANNEL__: 'official' | 'beta' | 'canary';
 
   interface Window {
     openclawApi?: {

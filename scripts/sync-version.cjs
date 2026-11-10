@@ -1,7 +1,25 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-function createBuildInfo(packageVersion, official = false, date = new Date()) {
+// Release mode is always Official. Other builds are Canary unless the Beta
+// distribution path asks for 'beta'.
+function buildChannel(official, requested = '') {
+  if (official) return 'official';
+  const channel = String(requested || '')
+    .trim()
+    .toLowerCase();
+  if (!channel) return 'canary';
+  if (channel !== 'canary' && channel !== 'beta')
+    throw new Error(`YAOC_BUILD_CHANNEL must be canary or beta, not ${requested}`);
+  return channel;
+}
+
+function createBuildInfo(
+  packageVersion,
+  official = false,
+  date = new Date(),
+  channel = process.env.YAOC_BUILD_CHANNEL
+) {
   const match =
     /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(
       packageVersion
@@ -16,7 +34,7 @@ function createBuildInfo(packageVersion, official = false, date = new Date()) {
   const minute = pad(date.getMinutes());
   return {
     version: official ? baseVersion : `${baseVersion}-dev${month}${day}${hour}${minute}`,
-    channel: official ? 'official' : 'beta',
+    channel: buildChannel(official, channel),
     timestamp: `${year}-${month}-${day} ${hour}:${minute}`,
   };
 }

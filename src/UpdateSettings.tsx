@@ -59,8 +59,8 @@ export default function UpdateSettings({ restartBlocked }: { restartBlocked: boo
         Check GitHub for official releases. Installed copies update through the installer. For
         portable copies, quit YAOC and replace the executable manually; your shared settings remain
         intact.
-        {__APP_CHANNEL__ === 'beta' &&
-          ' This Beta checks official releases only; it will not install a different Beta.'}
+        {__APP_CHANNEL__ !== 'official' &&
+          ` This ${__APP_CHANNEL__ === 'beta' ? 'Beta' : 'Canary'} build checks official releases only; it will not install Beta or Canary builds.`}
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <button className="btn btn-secondary" disabled={!!busy} onClick={() => void run('check')}>

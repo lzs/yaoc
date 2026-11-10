@@ -12,7 +12,7 @@ The owner agreed on these channel names and defaults on 2026-11-09:
 
 Canary versions retain `major.minor.patch-devMMDDHHMM`. After releasing a stable patch, development moves to the next patch base (for example, released `2026.1.1` → development `2026.1.2-dev…`). The channel badge is separate from this version string.
 
-**Pending implementation:** the current app badge still reports Beta / Testing and the local build wrapper still packages installers by default. The policy above records the intended behavior; it does not mean those code changes are complete. For Canary work, skip Authenticode and installer packaging, preserve local-only output, and stage both unsigned portable executables using `package:portable` with the existing three-generation backup rotation. Adapt the local wrapper before relying on it for this path. The older Beta descriptions and commands below describe the existing implementation.
+`scripts/build-local.ps1` implements these channels with `-Channel Canary|Beta|Official` (default Canary; `-Official` remains an alias for `-Channel Official`). Canary skips Authenticode and installer packaging, rejects `-Sign`, and stages both unsigned portable executables with `package:portable` and the three-generation backup rotation; installer outputs left from an earlier Beta/Official run are moved to `release/archive/retired-installers-*` so `SHA256SUMS.txt` only covers the new build. The wrapper also sets `YAOC_BUILD_CHANNEL` (`canary` or `beta`) for the frontend build, which stamps the Settings > About badge; direct `npm run dist:*` builds without it are Canary, and `npm run release` is always Official.
 
 ## Requirements
 
@@ -49,13 +49,16 @@ aarch64-w64-mingw32-clang --version
 
 ## Local builds from a network source checkout
 
-Keep the source checkout, documents, and agent instructions on the network drive. Run the build in `%USERPROFILE%\Documents\ChatGPT\yaoc` on the local disk:
+Keep the source checkout, documents, and agent instructions on the network drive. Run the build in `%USERPROFILE%\Documents\Builds\yaoc` on the local disk:
 
 ```powershell
+# Canary (default): unsigned portable executables only.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1
+# Beta distribution, when requested: signed executables and installers.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1 -Channel Beta -Sign
 ```
 
-The script copies source inputs, installs dependencies locally, runs checks and browser tests, builds both Beta architectures, and packages the combined installer and both portable executables. Its local `release/` directory retains the three rolling backup generations. Network `node_modules/`, `dist/`, `src-tauri/target/`, and `release/` directories are excluded from the copy. Only version manifests, lockfiles, and generated license notices are copied back to the source checkout, and concurrent source edits are preserved with a warning. Existing network build outputs can be retired separately.
+The script copies source inputs, installs dependencies locally, runs checks and browser tests, and builds both architectures. Canary then stages both unsigned portable executables and ZIPs; Beta and Official also package the combined installer. Its local `release/` directory retains the three rolling backup generations. Network `node_modules/`, `dist/`, `src-tauri/target/`, and `release/` directories are excluded from the copy. Only version manifests, lockfiles, and generated license notices are copied back to the source checkout, and concurrent source edits are preserved with a warning. Existing network build outputs can be retired separately.
 
 The local folder is a build workspace; edit source in the network checkout and rerun the script to refresh it. Source mirroring removes stale source files locally while preserving the excluded dependency, build, and release directories. `run-app.bat` launches the local portable executable and runs this workflow if the executable is missing. The commands below should be run in the local build workspace.
 
@@ -103,7 +106,7 @@ npm.cmd run package:installers
 
 `dist:*` creates Beta builds. Use `npm.cmd run release` only when preparing an official build; `release:x64` and `release:arm64` build a single official target. The version comes from `package.json`; Cargo and Tauri metadata must use the same version.
 
-Official releases use `major.minor.patch`, such as `2026.1.0`. Normal builds use `major.minor.patch-devMMDDHHMM`, for example `2026.1.0-dev01272005` for January 27 at 20:05 in the build machine's local time. The `dev` prefix keeps zero-padded months valid in SemVer. YAOC retains its calendar convention: the first component is the year and the second is the major version within that year. Settings > About contains the build details and a Beta / Testing or Official Release badge; the version has no `v` prefix or word `beta`.
+Official releases use `major.minor.patch`, such as `2026.1.0`. Normal builds use `major.minor.patch-devMMDDHHMM`, for example `2026.1.0-dev01272005` for January 27 at 20:05 in the build machine's local time. The `dev` prefix keeps zero-padded months valid in SemVer. YAOC retains its calendar convention: the first component is the year and the second is the major version within that year. Settings > About contains the build details and a Canary, Beta, or Official Release badge (set by `YAOC_BUILD_CHANNEL` for non-official builds, default Canary); the version has no `v` prefix or word `beta`.
 
 The Vite build generates one timestamp for both architectures. After emitting the frontend, `scripts/sync-version.cjs` stamps the same full version into `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` before Cargo runs. These files retain the most recent build version, so the UI, native Gateway identification, and Tauri metadata match. Subsequent builds replace the suffix; official builds remove it. Builds therefore update tracked version metadata. To bump the base version, update the matching manifests and lockfiles together; `npm.cmd run check` verifies consistency.
 
@@ -138,7 +141,7 @@ Edit `src/assets/yaoc.svg` and run `npm.cmd run icons`. Sharp is a declared deve
 Run from the network source checkout:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1 -Msix
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1 -Channel Beta -Msix
 ```
 
 This builds both Beta architectures and the existing EXE/ZIP installers, then creates local release/msix/yaoc-x64.msix, yaoc-arm64.msix, and yaoc.msixbundle. To package an existing matching build, run npm.cmd run package:msix in the local build workspace. Packaging checks executable product versions, uses MakeAppx's normal validation, includes licenses and tile icons, and writes separate checksums and build metadata. It never signs or publishes packages. Delivery to the network checkout is a separate verified copy.
@@ -173,6 +176,6 @@ Unsigned packages cannot be installed directly by double-clicking. The Store sig
 
 References: [MakeAppx packaging](https://learn.microsoft.com/en-us/windows/msix/package/create-app-package-with-makeappx-tool), [MSIX signing](https://learn.microsoft.com/en-us/windows/msix/package/sign-msix-package-guide), [virtualization and persistent data](https://learn.microsoft.com/en-us/windows/msix/desktop/flexible-virtualization).
 
-For an explicitly requested official build, load the updater signing environment described in UPDATES.md, then invoke the local workflow with both -Official and -Msix. The default remains Beta. Official installer packaging requires the existing Tauri updater key and its password; enter passwords locally and never store them in source or build logs. MSIX signing remains separate from installer updater signing.
+For an explicitly requested official build, load the updater signing environment described in UPDATES.md, then invoke the local workflow with -Channel Official -Sign -Msix. The default channel is Canary. Official installer packaging requires the existing Tauri updater key and its password; enter passwords locally and never store them in source or build logs. MSIX signing remains separate from installer updater signing.
 
 Official MSIX builds load the public Partner Center identity from src-tauri/windows/msix-store.json and map the app version to major.minor.patch.0. Environment values can override these defaults when necessary. Beta builds retain the development identity unless explicitly overridden.

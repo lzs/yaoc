@@ -1,13 +1,33 @@
 # Run from the source checkout. Build products stay in the local workspace.
+# Channels: Canary (default) = unsigned portable executables only; Beta = installers,
+# add -Sign for distribution; Official = release build with installers and updater signatures.
 [CmdletBinding()]
 param(
-    [string]$BuildRoot = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'ChatGPT\yaoc'),
+    [ValidateSet('Canary', 'Beta', 'Official')]
+    [string]$Channel = 'Canary',
+    [string]$BuildRoot = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Builds\yaoc'),
     [switch]$Msix,
+    # Retained for existing commands; equivalent to -Channel Official.
     [switch]$Official,
     [switch]$Sign,
     [string]$CertificateThumbprint = $env:YAOC_AUTHENTICODE_THUMBPRINT
 )
 $ErrorActionPreference = 'Stop'
+if ($Official) {
+    if ($PSBoundParameters.ContainsKey('Channel') -and $Channel -ne 'Official') {
+        throw "-Official conflicts with -Channel $Channel."
+    }
+    $Channel = 'Official'
+}
+$canary = $Channel -eq 'Canary'
+if ($canary) {
+    if ($Sign -or $PSBoundParameters.ContainsKey('CertificateThumbprint')) {
+        throw 'Canary builds are never Authenticode-signed. Use -Channel Beta -Sign for signed distribution.'
+    }
+    # Ignore an inherited thumbprint so nothing signs or verifies signatures.
+    $CertificateThumbprint = ''
+}
+Write-Host "YAOC $Channel build"
 $sourceRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent)).TrimEnd('\')
 $BuildRoot = [IO.Path]::GetFullPath($BuildRoot).TrimEnd('\')
 if ($BuildRoot.StartsWith('\\') -or ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($BuildRoot))).DriveType -ne 'Fixed') {
@@ -36,8 +56,12 @@ $oldThumbprint = $env:YAOC_AUTHENTICODE_THUMBPRINT
 $oldSignTool = $env:TAURI_WINDOWS_SIGNTOOL_PATH
 $oldTarget = $env:CARGO_TARGET_DIR
 $oldOfficialTest = $env:YAOC_TEST_OFFICIAL
-$env:YAOC_TEST_OFFICIAL = if ($Official) { '1' } else { '0' }
+$oldBuildChannel = $env:YAOC_BUILD_CHANNEL
+$env:YAOC_TEST_OFFICIAL = if ($Channel -eq 'Official') { '1' } else { '0' }
+# Stamps the About badge; official release mode sets its own channel.
+$env:YAOC_BUILD_CHANNEL = if ($Channel -eq 'Official') { $null } else { $Channel.ToLowerInvariant() }
 $env:CARGO_TARGET_DIR = Join-Path $BuildRoot 'src-tauri\target'
+if ($canary) { $env:YAOC_AUTHENTICODE_THUMBPRINT = $null }
 Push-Location $BuildRoot
 try {
     if ($Sign -or $CertificateThumbprint) {
@@ -57,6 +81,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Cannot locate SignTool.' }
         $env:TAURI_WINDOWS_SIGNTOOL_PATH = $resolvedSignTool
         Write-Host "Authenticode signing as $($certificates[0].Subject)"
+    } elseif (!$canary) {
+        Write-Warning "$Channel build is unsigned; add -Sign (with SimplySign connected) for distribution."
     }
     npm.cmd ci --prefer-offline
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
@@ -64,19 +90,35 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Source checks failed.' }
     npm.cmd test
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
-    if ($Official) {
+    if ($Channel -eq 'Official') {
         npm.cmd run release
         if ($LASTEXITCODE -ne 0) { throw 'Official build failed.' }
     } else {
         npm.cmd run dist:all
-        if ($LASTEXITCODE -ne 0) { throw 'Beta build failed.' }
+        if ($LASTEXITCODE -ne 0) { throw "$Channel build failed." }
     }
     npm.cmd run test:browser
     if ($LASTEXITCODE -ne 0) { throw 'Browser tests failed.' }
     npm.cmd run notices
     if ($LASTEXITCODE -ne 0) { throw 'Notice generation failed.' }
-    npm.cmd run package:installers
-    if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
+    if ($canary) {
+        # Retire installer outputs from an earlier Beta/Official run so SHA256SUMS.txt
+        # never pairs a stale installer with these Canary executables.
+        $release = Join-Path $BuildRoot 'release'
+        $stale = @('yaoc-setup.exe', 'yaoc-setup.exe.sig', 'installer-update.json') |
+            ForEach-Object { Join-Path $release $_ } | Where-Object { Test-Path -LiteralPath $_ }
+        if ($stale) {
+            $retired = Join-Path $release ('archive\retired-installers-' + [DateTimeOffset]::Now.ToUnixTimeMilliseconds())
+            New-Item -ItemType Directory -Path $retired -Force | Out-Null
+            $stale | ForEach-Object { Move-Item -LiteralPath $_ -Destination $retired }
+            Write-Host "Retired earlier installer outputs to $retired"
+        }
+        npm.cmd run package:portable
+        if ($LASTEXITCODE -ne 0) { throw 'Portable packaging failed.' }
+    } else {
+        npm.cmd run package:installers
+        if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
+    }
     if ($Msix) {
         npm.cmd run package:msix
         if ($LASTEXITCODE -ne 0) { throw 'MSIX packaging failed.' }
@@ -87,6 +129,7 @@ try {
     $env:TAURI_WINDOWS_SIGNTOOL_PATH = $oldSignTool
     $env:CARGO_TARGET_DIR = $oldTarget
     $env:YAOC_TEST_OFFICIAL = $oldOfficialTest
+    $env:YAOC_BUILD_CHANNEL = $oldBuildChannel
     # Return only generated source metadata, preserving any concurrent source edits.
     foreach ($file in $metadata) {
         $source = Join-Path $sourceRoot $file
@@ -98,4 +141,8 @@ try {
         }
     }
 }
-Write-Host "Installers and portable executables: $(Join-Path $BuildRoot 'release')"
+if ($canary) {
+    Write-Host "Canary portable executables: $(Join-Path $BuildRoot 'release')"
+} else {
+    Write-Host "Installers and portable executables: $(Join-Path $BuildRoot 'release')"
+}
