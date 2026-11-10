@@ -24,7 +24,7 @@ The vendored NSIS template comes from tauri-cli-v2.10.1 under MIT/Apache-2.0. YA
 
 ## Build and publish
 
-Local development builds are now called **Canary**: unsigned portable executables, without installers. Beta is reserved for requested prerelease distribution with signed executables and installers; Official is a requested stable signed release with Tauri updater signatures. See [BUILD.md](BUILD.md#build-channel-policy) for the policy and pending wrapper/badge changes. The following commands describe the existing Beta distribution packaging path:
+Local development builds are now called **Canary**: unsigned portable executables, without installers. Beta is reserved for requested prerelease distribution with signed executables and installers; Official is a requested stable signed release with Tauri updater signatures. See [BUILD.md](BUILD.md#build-channel-policy) for the policy; `scripts/build-local.ps1` defaults to Canary, and the About badge shows the channel. The following commands describe the Beta distribution packaging path (`build-local.ps1 -Channel Beta`):
 
 ```powershell
 npm.cmd run dist:all
@@ -75,10 +75,10 @@ Remove-Variable yaocKeyPassword
 YAOC supports optional Windows Authenticode signing with the owner's Certum Code Signing in the Cloud certificate. Install SimplySign Desktop and Windows SDK Signing Tools for Desktop Apps, then connect SimplySign Desktop using the phone app before building. From the network source checkout, run:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1 -Sign
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-local.ps1 -Channel Beta -Sign
 ```
 
-This builds a signed Beta in the local workspace, automatically selecting the single valid code-signing certificate and finding SignTool. If multiple certificates exist, add `-CertificateThumbprint "YOUR_CERTIFICATE_THUMBPRINT"`. An official build still requires an explicit request and the separate Tauri updater signing environment above. The certificate thumbprint is public; SimplySign tokens and PINs stay in its apps and are never stored in source.
+This builds a signed Beta in the local workspace (the wrapper rejects `-Sign` for the default Canary channel), automatically selecting the single valid code-signing certificate and finding SignTool. If multiple certificates exist, add `-CertificateThumbprint "YOUR_CERTIFICATE_THUMBPRINT"`. An official build still requires an explicit request and the separate Tauri updater signing environment above. The certificate thumbprint is public; SimplySign tokens and PINs stay in its apps and are never stored in source.
 
 For direct local packaging, set `YAOC_AUTHENTICODE_THUMBPRINT` to the certificate thumbprint and optionally `TAURI_WINDOWS_SIGNTOOL_PATH` to an explicit SignTool path before `npm.cmd run package:installers`. Tauri signs each application after its bundle marker is patched, signs NSIS plugins and the uninstaller, and signs the installer before generating detached updater signatures. The capture hook verifies the application signature and timestamp before embedding it. Packaging verifies installers and both portable payloads before creating ZIPs and checksums; a failed signature or missing timestamp stops packaging. Do not sign distributed files afterward, as that invalidates checksums and detached updater signatures.
 

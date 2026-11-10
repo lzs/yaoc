@@ -894,9 +894,14 @@ async function openApp(browser, options = {}) {
       const about = page.getByRole('tabpanel', { name: 'About', exact: true });
       await about.getByText('Build & Version Info', { exact: true }).waitFor();
       await about
-        .getByText(process.env.YAOC_TEST_OFFICIAL === '1' ? 'Official Release' : 'Beta / Testing', {
-          exact: true,
-        })
+        .getByText(
+          process.env.YAOC_TEST_OFFICIAL === '1'
+            ? 'Official Release'
+            : process.env.YAOC_BUILD_CHANNEL === 'beta'
+              ? 'Beta'
+              : 'Canary',
+          { exact: true }
+        )
         .waitFor();
       const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'))).version;
       await about.getByText(appVersion, { exact: true }).waitFor();

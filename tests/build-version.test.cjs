@@ -7,15 +7,26 @@ const { createBuildInfo, syncVersion } = require('../scripts/sync-version.cjs');
 
 test('normal builds preserve zero-padded dates and official builds remove the suffix', () => {
   const january = new Date(2026, 0, 27, 20, 5);
-  const normal = createBuildInfo('2026.1.0', false, january);
+  const normal = createBuildInfo('2026.1.0', false, january, '');
   assert.equal(normal.version, '2026.1.0-dev01272005');
-  assert.equal(normal.channel, 'beta');
+  assert.equal(normal.channel, 'canary');
   assert.equal(normal.timestamp, '2026-01-27 20:05');
   const next = createBuildInfo(normal.version, false, new Date(2026, 9, 27, 20, 5));
   assert.equal(next.version, '2026.1.0-dev10272005');
-  assert.equal(createBuildInfo(next.version, true, january).version, '2026.1.0');
-  assert.equal(createBuildInfo(next.version, true, january).channel, 'official');
+  assert.equal(createBuildInfo(next.version, true, january, '').version, '2026.1.0');
+  assert.equal(createBuildInfo(next.version, true, january, '').channel, 'official');
   assert.equal(createBuildInfo('2027.2.3', false, january).version, '2027.2.3-dev01272005');
+});
+
+test('non-official builds are Canary unless Beta is requested; official builds stay official', () => {
+  const date = new Date(2026, 10, 10, 9, 0);
+  assert.equal(createBuildInfo('2026.1.2', false, date, '').channel, 'canary');
+  assert.equal(createBuildInfo('2026.1.2', false, date, 'Canary').channel, 'canary');
+  assert.equal(createBuildInfo('2026.1.2', false, date, 'beta').channel, 'beta');
+  assert.equal(createBuildInfo('2026.1.2', false, date, 'beta').version, '2026.1.2-dev11100900');
+  assert.equal(createBuildInfo('2026.1.2', true, date, '').channel, 'official');
+  assert.throws(() => createBuildInfo('2026.1.2', false, date, 'nightly'), /canary or beta/);
+  assert.equal(createBuildInfo('2026.1.2', true, date, 'canary').channel, 'official');
 });
 
 test('all manifests and lockfiles agree across repeated builds and an official release', (t) => {

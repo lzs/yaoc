@@ -5172,7 +5172,7 @@ dependencies = [
 
 [[package]]
 name = "yaoc"
-version = "2026.1.2"
+version = "2026.1.3-dev11100939"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",

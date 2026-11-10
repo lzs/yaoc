@@ -5381,14 +5381,22 @@ export default function App() {
                           background:
                             __APP_CHANNEL__ === 'official'
                               ? 'rgba(34, 197, 94, 0.14)'
-                              : 'rgba(245, 158, 11, 0.16)',
+                              : __APP_CHANNEL__ === 'beta'
+                                ? 'rgba(56, 189, 248, 0.14)'
+                                : 'rgba(245, 158, 11, 0.16)',
                           color:
                             __APP_CHANNEL__ === 'official'
                               ? 'var(--text-success)'
-                              : 'var(--text-warning)',
+                              : __APP_CHANNEL__ === 'beta'
+                                ? 'var(--text-info)'
+                                : 'var(--text-warning)',
                         }}
                       >
-                        {__APP_CHANNEL__ === 'official' ? 'Official Release' : 'Beta / Testing'}
+                        {__APP_CHANNEL__ === 'official'
+                          ? 'Official Release'
+                          : __APP_CHANNEL__ === 'beta'
+                            ? 'Beta'
+                            : 'Canary'}
                       </span>
                     </div>
                     <p className="settings-help">

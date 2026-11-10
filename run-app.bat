@@ -1,6 +1,6 @@
 @echo off
 setlocal
-for /f "delims=" %%I in ('powershell.exe -NoProfile -Command "[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)"') do set "YAOC_BUILD_ROOT=%%I\ChatGPT\yaoc"
+for /f "delims=" %%I in ('powershell.exe -NoProfile -Command "[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)"') do set "YAOC_BUILD_ROOT=%%I\Builds\yaoc"
 if not defined YAOC_BUILD_ROOT exit /b 1
 if /I "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
     if exist "%YAOC_BUILD_ROOT%\release\yaoc-arm64.exe" (
