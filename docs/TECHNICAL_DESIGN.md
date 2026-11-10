@@ -477,7 +477,7 @@ The pinned custom NSIS template preserves all shared data and unrelated files, r
 
 ### MSIX distribution
 
-The optional local build switch `-Msix` invokes `scripts/package-msix.cjs` after standard packaging. It stages x64 and ARM64 payloads with visual assets and licenses, validates each package with MakeAppx, and creates an unsigned bundle. Development and Partner Center identities are independent of the Tauri identifier. Windows application identity selects `msix` mode before NSIS sidecar detection. Notifications use the package AUMID without portable registration; backend guards reject NSIS updates. The manifest disables AppData file write virtualization with `unvirtualizedResources` to retain shared state across modes and uninstall. See `docs/BUILD.md` for identity, versioning, signing and acceptance requirements.
+The optional local build switch `-Msix` invokes `scripts/package-msix.cjs` after standard packaging. It stages x64 and ARM64 payloads with visual assets and licenses, validates each package with MakeAppx, and creates an unsigned bundle. Development and Partner Center identities are independent of the Tauri identifier. Windows application identity selects `msix` mode before NSIS sidecar detection. Notifications use the package AUMID without portable registration; backend guards reject NSIS updates. The manifest keeps standard AppData write virtualization and requests no `unvirtualizedResources` capability (Microsoft Store denied it), so packaged state is private to the package, separate from portable and NSIS copies, and removed on uninstall. See `docs/BUILD.md` for identity, versioning, signing and acceptance requirements.
 
 ### Live tool activity
 
