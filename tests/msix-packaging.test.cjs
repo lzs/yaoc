@@ -26,8 +26,9 @@ test('Store identity requires complete values and an explicit valid package vers
   const xml = manifest(config, 'arm64');
   assert.match(xml, /Example &amp; Company/);
   assert.match(xml, /ProcessorArchitecture="arm64"/);
-  assert.match(xml, /FileSystemWriteVirtualization>disabled</);
-  assert.match(xml, /Name="unvirtualizedResources"/);
+  assert.doesNotMatch(xml, /FileSystemWriteVirtualization/);
+  assert.doesNotMatch(xml, /unvirtualizedResources/);
+  assert.match(xml, /Name="runFullTrust"/);
   assert.match(xml, /EntryPoint="Windows.FullTrustApplication"/);
   assert.throws(() => manifest(config, 'x86'), /Unsupported/);
 });

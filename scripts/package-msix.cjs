@@ -62,15 +62,13 @@ function manifest(config, arch) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
- xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
- IgnorableNamespaces="uap desktop6 rescap">
+ IgnorableNamespaces="uap rescap">
  <Identity Name="${xml(config.name)}" Publisher="${xml(config.publisher)}" Version="${config.version}" ProcessorArchitecture="${arch}"/>
  <Properties>
   <DisplayName>${xml(config.displayName)}</DisplayName>
   <PublisherDisplayName>${xml(config.publisherDisplayName)}</PublisherDisplayName>
   <Logo>Assets\\StoreLogo.png</Logo>
-  <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
  </Properties>
  <Resources><Resource Language="en-us"/></Resources>
  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0"/></Dependencies>
@@ -84,7 +82,6 @@ function manifest(config, arch) {
  </Applications>
  <Capabilities>
   <rescap:Capability Name="runFullTrust"/>
-  <rescap:Capability Name="unvirtualizedResources"/>
  </Capabilities>
 </Package>
 `;
@@ -241,7 +238,7 @@ async function main() {
       'Microsoft Store signs approved submissions. Tauri updater keys cannot sign MSIX.',
       'Packages support Windows 10 2004+ and require Microsoft Edge WebView2 Runtime.',
       'MSIX updates are managed by the Store or MSIX distribution source, never the NSIS updater.',
-      'Shared AppData is preserved using unvirtualizedResources; explain this restricted capability in Store submission.',
+      'AppData writes are virtualized per package; MSIX state is separate from other modes and removed on uninstall.',
       'See docs/BUILD.md for identity, versioning, validation, and signing details.',
     ].join('\r\n') + '\r\n'
   );
