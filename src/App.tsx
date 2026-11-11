@@ -5444,14 +5444,29 @@ export default function App() {
                         <p className="settings-help" style={{ overflowWrap: 'anywhere' }}>
                           {sysInfo.distribution.executable}
                         </p>
-                        <label>Shared data</label>
+                        <label>
+                          {sysInfo.distribution.packageStorage ? 'Package data' : 'Shared data'}
+                        </label>
                         <p className="settings-help" style={{ overflowWrap: 'anywhere' }}>
-                          {sysInfo.distribution.dataDirectory}
+                          {
+                            (sysInfo.distribution.packageStorage ?? sysInfo.distribution)
+                              .dataDirectory
+                          }
                         </p>
                         <label>Browser data</label>
                         <p className="settings-help" style={{ overflowWrap: 'anywhere' }}>
-                          {sysInfo.distribution.webviewDirectory}
+                          {
+                            (sysInfo.distribution.packageStorage ?? sysInfo.distribution)
+                              .webviewDirectory
+                          }
                         </p>
+                        {sysInfo.distribution.packageStorage && (
+                          <p className="settings-help">
+                            This copy's data is private to its package and Windows removes it on
+                            uninstall. Existing YAOC data elsewhere on this PC is read but never
+                            changed.
+                          </p>
+                        )}
                         {sysInfo.distribution.mode === 'portable' && (
                           <p className="settings-help">
                             Windows notifications use the separate YAOC Portable identity.
