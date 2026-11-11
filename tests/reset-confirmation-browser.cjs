@@ -203,7 +203,8 @@ module.exports = async function testResetConfirmation(browser, openApp) {
       )
     );
     assert.equal(await sendCount(), 1);
-    assert.equal(await composer.inputValue(), '');
+    // The send request is recorded before React commits the cleared composer.
+    await page.waitForFunction((input) => input.value === '', await composer.elementHandle());
     await page.evaluate(() => window.testFinishRun('test-run'));
     await page.getByRole('button', { name: 'Send message', exact: true }).waitFor();
     await composer.fill('/resetting is an ordinary word');
