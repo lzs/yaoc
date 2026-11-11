@@ -129,6 +129,11 @@ export interface SystemInfo {
     executable: string;
     dataDirectory: string;
     webviewDirectory: string;
+    /** MSIX only: where Windows actually stores the package's writes. */
+    packageStorage?: {
+      dataDirectory: string;
+      webviewDirectory: string;
+    };
   };
   deviceIdentity?: {
     deviceId: string;
