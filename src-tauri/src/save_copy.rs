@@ -3,7 +3,10 @@
 
 /// Turns a workspace path into a safe default file name for the dialog.
 fn suggested_name(workspace_path: &str) -> String {
-    let base = workspace_path.rsplit(['/', '\\']).next().unwrap_or_default();
+    let base = workspace_path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
     let cleaned: String = base
         .chars()
         .map(|c| match c {
@@ -30,9 +33,10 @@ pub async fn save_file_copy(
     #[cfg(windows)]
     {
         let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
-        let picked = tauri::async_runtime::spawn_blocking(move || dialog::pick_save_path(owner, &name))
-            .await
-            .map_err(|e| e.to_string())??;
+        let picked =
+            tauri::async_runtime::spawn_blocking(move || dialog::pick_save_path(owner, &name))
+                .await
+                .map_err(|e| e.to_string())??;
         let Some(path) = picked else {
             return Ok(None);
         };
@@ -144,7 +148,9 @@ mod dialog {
                 | OFN_EXPLORER,
             file_offset: 0,
             file_extension: 0,
-            default_ext: default_ext.as_ref().map_or(std::ptr::null(), |e| e.as_ptr()),
+            default_ext: default_ext
+                .as_ref()
+                .map_or(std::ptr::null(), |e| e.as_ptr()),
             cust_data: 0,
             hook: std::ptr::null(),
             template_name: std::ptr::null(),
@@ -153,7 +159,11 @@ mod dialog {
             flags_ex: 0,
         };
         let accepted = unsafe { GetSaveFileNameW(&mut ofn) } != 0;
-        let error = if accepted { 0 } else { unsafe { CommDlgExtendedError() } };
+        let error = if accepted {
+            0
+        } else {
+            unsafe { CommDlgExtendedError() }
+        };
         if com >= 0 {
             unsafe { CoUninitialize() };
         }
