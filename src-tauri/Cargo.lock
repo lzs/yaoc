@@ -5175,6 +5175,7 @@ name = "yaoc"
 version = "2026.1.3"
 dependencies = [
  "base64 0.22.1",
+ "dunce",
  "ed25519-dalek",
  "futures-util",
  "hex",
