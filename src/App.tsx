@@ -530,6 +530,10 @@ async function hashWorkspaceText(content: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+// Gateway refusals for a write whose file changed (or appeared) since it was read.
+const WORKSPACE_CONFLICT_PATTERN =
+  /changed since it was read|session_file_conflict|agent_file_conflict|hash.*(?:mismatch|conflict)/i;
+
 export default function App() {
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
   const [profiles, setProfiles] = useState<GatewayProfile[]>([]);
@@ -856,6 +860,8 @@ export default function App() {
   const [fileContent, setFileContent] = useState<string>('');
   const [savedFileContent, setSavedFileContent] = useState<string>('');
   const [savedFileHash, setSavedFileHash] = useState<string | undefined>();
+  // True when the open file did not exist on the Gateway when it was read (or could not be read).
+  const [savedFileMissing, setSavedFileMissing] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
   const [savingFile, setSavingFile] = useState(false);
   const [fileStatusMsg, setFileStatusMsg] = useState<string>('');
@@ -2304,6 +2310,7 @@ export default function App() {
       setFileContent(text);
       setSavedFileContent(text);
       setSavedFileHash(workspaceFileHash(res));
+      setSavedFileMissing(res?.file?.missing === true);
       setFileStatusMsg(`${cleanRelPath} • ${(bytes / 1024).toFixed(1)} KB`);
       setLoadingFile(false);
       return;
@@ -2325,7 +2332,14 @@ export default function App() {
       setFileContent(text);
       setSavedFileContent(text);
       setSavedFileHash(workspaceFileHash(res));
-      setFileStatusMsg(`${cleanRelPath} • ${(bytes / 1024).toFixed(1)} KB`);
+      // Agent files report an absent file as `missing` rather than as an error.
+      const missing = res?.file?.missing === true;
+      setSavedFileMissing(missing);
+      setFileStatusMsg(
+        missing
+          ? `${cleanRelPath} does not exist yet; Save creates it`
+          : `${cleanRelPath} • ${(bytes / 1024).toFixed(1)} KB`
+      );
       setLoadingFile(false);
       return;
     } catch (err: any) {
@@ -2334,6 +2348,8 @@ export default function App() {
       setFileContent('');
       setSavedFileContent('');
       setSavedFileHash(undefined);
+      // Saving then only creates the file; if it exists after all, the Gateway refuses.
+      setSavedFileMissing(true);
       setFileStatusMsg(
         `Could not load ${cleanRelPath}: ${err?.message || 'File does not exist yet'}`
       );
@@ -2373,26 +2389,30 @@ export default function App() {
     try {
       let saved = false;
       let savedResult: any;
-      // 1. If root agent file, try agents.files.set({ agentId, name, content }) first
+      // Writes are bound to the revision that was read (never the draft), so the Gateway
+      // refuses them if someone else changed the file meanwhile.
+      const expectedHash = savedFileHash ?? (await hashWorkspaceText(savedFileContent));
+      if (!isCurrent()) return;
+      // 1. Agent files at the root: agents.files.set, which can also create a missing one.
       if (isRootFile) {
         try {
           savedResult = await api.request('agents.files.set', {
             agentId: selectedAgentId,
             name: cleanRelPath,
             content: fileContent,
+            ...(savedFileMissing ? { expectedMissing: true } : { expectedHash }),
           });
           saved = true;
-        } catch {
+        } catch (err: any) {
           if (!isCurrent()) return;
-          // Fall through to sessions.files.set for arbitrary root files
+          if (WORKSPACE_CONFLICT_PATTERN.test(err?.message || '')) throw err;
+          // Other root files, or an older Gateway without preconditions: sessions.files.set
         }
       }
 
-      // Session file writes require the revision of the original contents, never the draft.
+      // 2. Everything else: sessions.files.set, which only updates existing files.
       if (!isCurrent()) return;
       if (!saved) {
-        const expectedHash = savedFileHash ?? (await hashWorkspaceText(savedFileContent));
-        if (!isCurrent()) return;
         const fullTarget = cleanRelPath.startsWith('/')
           ? cleanRelPath
           : `${workspaceRootPath}/${cleanRelPath}`;
@@ -2407,6 +2427,7 @@ export default function App() {
       if (!isCurrent()) return;
       setSavedFileContent(fileContent);
       setSavedFileHash(workspaceFileHash(savedResult));
+      setSavedFileMissing(false);
       setFileStatusMsg(
         `✓ Saved ${cleanRelPath} (${(new Blob([fileContent]).size / 1024).toFixed(1)} KB)`
       );
@@ -2415,9 +2436,7 @@ export default function App() {
       if (isCurrent()) {
         const message = err?.message || 'Unknown error';
         setFileStatusMsg(
-          /session file changed|session_file_conflict|agent_file_conflict|hash.*(?:mismatch|conflict)/i.test(
-            message
-          )
+          WORKSPACE_CONFLICT_PATTERN.test(message)
             ? 'File changed on the Gateway. Your edits are still here; copy them before reloading and merging the changes.'
             : `Failed to save: ${message}`
         );
