@@ -207,6 +207,11 @@ declare global {
       openExternalUrl?: (url: string) => Promise<{ ok: boolean }>;
       /** Shows a Save As dialog; resolves to the saved path, or null if cancelled. */
       saveFileCopy?: (fileName: string, content: string) => Promise<string | null>;
+      exportTranscript?: (
+        fileName: string,
+        markdown: string,
+        html: string
+      ) => Promise<string | null>;
       setTaskbarProgress?: (
         status?: 'none' | 'normal' | 'indeterminate' | 'paused' | 'error',
         progress?: number

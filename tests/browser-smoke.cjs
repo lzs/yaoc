@@ -89,7 +89,13 @@ async function openApp(browser, options = {}) {
     let maximized = Boolean(options.maximized);
     const windowCallbacks = new Set();
 
+    window.testExports = [];
     window.openclawApi = {
+      exportTranscript: async (fileName, markdown, html) => {
+        if (options.exportError) throw new Error('Disk is full');
+        window.testExports.push({ fileName, markdown, html });
+        return `C:/Exports/${fileName}.md`;
+      },
       windowAction: async (action) => {
         window.testWindowActions.push(action);
         if (action === 'toggleMaximize') {
@@ -333,6 +339,8 @@ async function openApp(browser, options = {}) {
     if (process.env.YAOC_TEST_PINS_ONLY === '1') return;
     await require('./reset-confirmation-browser.cjs')(browser, openApp);
     if (process.env.YAOC_TEST_RESET_ONLY === '1') return;
+    await require('./transcript-export-browser.cjs')(browser, openApp);
+    if (process.env.YAOC_TEST_EXPORT_ONLY === '1') return;
     {
       const updates = await openApp(browser, {
         sessionRows: [

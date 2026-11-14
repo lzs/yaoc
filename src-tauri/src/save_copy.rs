@@ -1,8 +1,9 @@
-//! "Save a copy" for workspace files: a native Save As dialog, then a plain UTF-8 write.
-//! Uses comdlg32 directly (no extra crates); on Windows 10/11 it shows the modern dialog.
+//! Native Save As for "Save a copy" (workspace files) and conversation exports,
+//! followed by a plain UTF-8 write. Uses comdlg32 directly (no extra crates); on
+//! Windows 10/11 it shows the modern dialog.
 
 /// Turns a workspace path into a safe default file name for the dialog.
-fn suggested_name(workspace_path: &str) -> String {
+fn suggested_name(workspace_path: &str, fallback: &str) -> String {
     let base = workspace_path
         .rsplit(['/', '\\'])
         .next()
@@ -17,7 +18,7 @@ fn suggested_name(workspace_path: &str) -> String {
         .collect();
     let cleaned = cleaned.trim_end_matches(['.', ' ']).trim();
     if cleaned.is_empty() {
-        "workspace-file.txt".into()
+        fallback.into()
     } else {
         cleaned.into()
     }
@@ -29,15 +30,24 @@ pub async fn save_file_copy(
     file_name: String,
     content: String,
 ) -> Result<Option<String>, String> {
-    let name = suggested_name(&file_name);
+    let name = suggested_name(&file_name, "workspace-file.txt");
     #[cfg(windows)]
     {
         let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
-        let picked =
-            tauri::async_runtime::spawn_blocking(move || dialog::pick_save_path(owner, &name))
-                .await
-                .map_err(|e| e.to_string())??;
-        let Some(path) = picked else {
+        let picked = tauri::async_runtime::spawn_blocking(move || {
+            dialog::pick_save_path(
+                owner,
+                &dialog::SaveDialog {
+                    title: "Save a Copy",
+                    filter: "All files (*.*)\0*.*\0",
+                    suggested: &name,
+                    default_ext: name.rsplit_once('.').map(|(_, ext)| ext),
+                },
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let Some((path, _)) = picked else {
             return Ok(None);
         };
         std::fs::write(&path, content.as_bytes())
@@ -48,6 +58,66 @@ pub async fn save_file_copy(
     {
         let _ = (window, name, content);
         Err("Saving a copy is only available on Windows.".into())
+    }
+}
+
+/// Which format an export should be written in, from the chosen path and file type.
+fn export_wants_html(path: &std::path::Path, filter_index: u32) -> bool {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("html" | "htm") => true,
+        Some("md" | "markdown" | "txt") => false,
+        _ => filter_index == 2,
+    }
+}
+
+/// Exports a conversation. The page sends both renderings; the Save As file type
+/// (or the typed extension) decides which one is written.
+#[tauri::command]
+pub async fn export_transcript(
+    window: tauri::WebviewWindow,
+    file_name: String,
+    markdown: String,
+    html: String,
+) -> Result<Option<String>, String> {
+    let base = suggested_name(&file_name, "conversation");
+    #[cfg(windows)]
+    {
+        let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+        let suggested = format!("{base}.md");
+        let picked = tauri::async_runtime::spawn_blocking(move || {
+            dialog::pick_save_path(
+                owner,
+                &dialog::SaveDialog {
+                    title: "Export Conversation",
+                    filter: "Markdown (*.md)\0*.md\0HTML page (*.html)\0*.html\0",
+                    suggested: &suggested,
+                    default_ext: Some("md"),
+                },
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let Some((path, filter_index)) = picked else {
+            return Ok(None);
+        };
+        let content = if export_wants_html(&path, filter_index) {
+            html
+        } else {
+            markdown
+        };
+        std::fs::write(&path, content.as_bytes())
+            .map_err(|e| format!("Could not write {}: {e}", path.display()))?;
+        Ok(Some(path.display().to_string()))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, base, markdown, html);
+        Err("Exporting is only available on Windows.".into())
     }
 }
 
@@ -107,8 +177,20 @@ mod dialog {
         text.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    /// Shows the dialog modally over `owner`. `Ok(None)` means the user cancelled.
-    pub fn pick_save_path(owner: isize, suggested: &str) -> Result<Option<PathBuf>, String> {
+    pub struct SaveDialog<'a> {
+        pub title: &'a str,
+        /// Pairs of "label\0pattern\0"; the final terminator is added here.
+        pub filter: &'a str,
+        pub suggested: &'a str,
+        pub default_ext: Option<&'a str>,
+    }
+
+    /// Shows the dialog modally over `owner`. Returns the chosen path and the
+    /// 1-based index of the selected file type; `Ok(None)` means the user cancelled.
+    pub fn pick_save_path(
+        owner: isize,
+        options: &SaveDialog<'_>,
+    ) -> Result<Option<(PathBuf, u32)>, String> {
         // The shell dialog needs a single-threaded apartment on this worker thread.
         let com = unsafe {
             CoInitializeEx(
@@ -117,16 +199,12 @@ mod dialog {
             )
         };
         let mut buffer = vec![0u16; MAX_PATH_CHARS];
-        for (slot, unit) in buffer.iter_mut().zip(suggested.encode_utf16()) {
+        for (slot, unit) in buffer.iter_mut().zip(options.suggested.encode_utf16()) {
             *slot = unit;
         }
-        let filter: Vec<u16> = "All files (*.*)\0*.*\0\0".encode_utf16().collect();
-        let title = wide("Save a Copy");
-        let extension = suggested
-            .rsplit_once('.')
-            .map(|(_, ext)| ext)
-            .filter(|ext| !ext.is_empty());
-        let default_ext = extension.map(wide);
+        let filter = wide(options.filter);
+        let title = wide(options.title);
+        let default_ext = options.default_ext.filter(|ext| !ext.is_empty()).map(wide);
         let mut ofn = OpenFileNameW {
             struct_size: std::mem::size_of::<OpenFileNameW>() as u32,
             owner,
@@ -175,22 +253,32 @@ mod dialog {
             };
         }
         let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-        Ok(Some(PathBuf::from(std::ffi::OsString::from_wide(
-            &buffer[..len],
-        ))))
+        let path = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..len]));
+        Ok(Some((path, ofn.filter_index)))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::suggested_name;
+    use super::{export_wants_html, suggested_name};
+    use std::path::Path;
 
     #[test]
     fn suggested_name_uses_the_base_name_and_strips_invalid_characters() {
-        assert_eq!(suggested_name("docs/notes.md"), "notes.md");
-        assert_eq!(suggested_name("a\\b\\c.txt"), "c.txt");
-        assert_eq!(suggested_name("what?.md"), "what_.md");
-        assert_eq!(suggested_name("trailing. "), "trailing");
-        assert_eq!(suggested_name("docs/"), "workspace-file.txt");
+        let name = |p| suggested_name(p, "workspace-file.txt");
+        assert_eq!(name("docs/notes.md"), "notes.md");
+        assert_eq!(name("a\\b\\c.txt"), "c.txt");
+        assert_eq!(name("what?.md"), "what_.md");
+        assert_eq!(name("trailing. "), "trailing");
+        assert_eq!(name("docs/"), "workspace-file.txt");
+    }
+
+    #[test]
+    fn export_format_follows_the_extension_then_the_file_type() {
+        assert!(export_wants_html(Path::new("C:/x/chat.html"), 1));
+        assert!(export_wants_html(Path::new("C:/x/chat.HTM"), 1));
+        assert!(!export_wants_html(Path::new("C:/x/chat.md"), 2));
+        assert!(export_wants_html(Path::new("C:/x/chat"), 2));
+        assert!(!export_wants_html(Path::new("C:/x/chat.log"), 1));
     }
 }

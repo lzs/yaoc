@@ -149,6 +149,8 @@ export function initTauriBridge(): void {
 
     saveFileCopy: (fileName: string, content: string) =>
       invokeWithError<string | null>('save_file_copy', { fileName, content }),
+    exportTranscript: (fileName: string, markdown: string, html: string) =>
+      invokeWithError<string | null>('export_transcript', { fileName, markdown, html }),
 
     setTaskbarProgress: (status?: string, progress?: number) =>
       invokeWithError<void>('set_taskbar_progress', {

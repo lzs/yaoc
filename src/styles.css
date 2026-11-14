@@ -3282,3 +3282,40 @@ textarea {
   min-width: 92px;
   padding: 8px 14px;
 }
+
+.chat-export-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 16px 0;
+  padding: 5px 8px 5px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.chat-export-status.is-error {
+  color: var(--text-danger);
+  border-color: var(--border-strong);
+}
+.chat-export-status span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-export-status-close {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.chat-export-status-close:hover {
+  background: var(--bg-hover);
+}

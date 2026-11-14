@@ -8,6 +8,7 @@ import {
   Cpu,
   Download,
   FileCode2,
+  FileDown,
   FileText,
   Folder,
   FolderOpen,
@@ -65,6 +66,12 @@ import KeyboardShortcuts from './KeyboardShortcuts';
 import SessionTokenMeter from './SessionTokenMeter';
 import ChatActionButton from './ChatActionButton';
 import ConversationFind from './ConversationFind';
+import {
+  buildTranscriptHtml,
+  buildTranscriptMarkdown,
+  transcriptBaseName,
+} from './transcriptExport';
+import { renderMessageHtml } from './transcriptRender';
 import ResetSessionDialog from './ResetSessionDialog';
 import {
   changeSessionPin,
@@ -640,6 +647,12 @@ export default function App() {
   }, [activeProfileId, selectedAgentId, connStatus.state]);
   const [chatAction, setChatAction] = useState<'reload' | 'reset' | null>(null);
   const chatActionInFlight = useRef(false);
+  const [exportStatus, setExportStatus] = useState<{
+    sessionKey: string;
+    text: string;
+    error: boolean;
+  } | null>(null);
+  const exportInFlight = useRef(false);
 
   async function runChatAction(action: 'reload' | 'reset', task: () => Promise<void>) {
     if (chatActionInFlight.current) return;
@@ -2462,6 +2475,47 @@ export default function App() {
     }
   }
 
+  async function handleExportConversation() {
+    const api = window.openclawApi;
+    if (!api?.exportTranscript || messages.length === 0 || exportInFlight.current) return;
+    const gatewayKey = toGatewaySessionKey(selectedAgentId, selectedSessionKey);
+    const statusKey = `${activeProfileId}:${gatewayKey}`;
+    const session = sessions.find((s) => s.key === gatewayKey || s.key === selectedSessionKey);
+    const meta = {
+      title: session ? getSessionDisplayName(session) : selectedSessionKey,
+      agentId: selectedAgentId,
+      sessionKey: selectedSessionKey,
+      exportedAt: new Date(),
+    };
+    exportInFlight.current = true;
+    try {
+      const markdown = buildTranscriptMarkdown(meta, messages);
+      const html = buildTranscriptHtml(meta, messages, { renderMarkdown: renderMessageHtml });
+      const savedPath = await api.exportTranscript(transcriptBaseName(meta), markdown, html);
+      if (savedPath) {
+        setExportStatus({
+          sessionKey: statusKey,
+          text: `✓ Exported to ${savedPath}`,
+          error: false,
+        });
+      }
+    } catch (err: any) {
+      setExportStatus({
+        sessionKey: statusKey,
+        text: `Could not export: ${err?.message || 'Unknown error'}`,
+        error: true,
+      });
+    } finally {
+      exportInFlight.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!exportStatus || exportStatus.error) return;
+    const timer = setTimeout(() => setExportStatus(null), 8000);
+    return () => clearTimeout(timer);
+  }, [exportStatus]);
+
   async function connectGateway(profile: GatewayProfile) {
     const api = window.openclawApi;
     if (!api) return;
@@ -3764,6 +3818,16 @@ export default function App() {
                 <Search size={13} aria-hidden="true" />
               </ChatActionButton>
               <ChatActionButton
+                id="export-conversation"
+                label="Export conversation (Markdown or HTML)"
+                busyLabel="Export conversation (Markdown or HTML)"
+                busy={false}
+                disabled={!window.openclawApi?.exportTranscript || messages.length === 0}
+                onClick={() => void handleExportConversation()}
+              >
+                <FileDown size={13} aria-hidden="true" />
+              </ChatActionButton>
+              <ChatActionButton
                 id="reload-chat"
                 label="Reload chat"
                 busyLabel="Reloading chat…"
@@ -3795,6 +3859,25 @@ export default function App() {
               </ChatActionButton>
             </div>
           </div>
+
+          {exportStatus &&
+            exportStatus.sessionKey ===
+              `${activeProfileId}:${toGatewaySessionKey(selectedAgentId, selectedSessionKey)}` && (
+              <div
+                className={`chat-export-status${exportStatus.error ? ' is-error' : ''}`}
+                role={exportStatus.error ? 'alert' : 'status'}
+              >
+                <span title={exportStatus.text}>{exportStatus.text}</span>
+                <button
+                  type="button"
+                  className="chat-export-status-close"
+                  aria-label="Dismiss"
+                  onClick={() => setExportStatus(null)}
+                >
+                  <X size={12} aria-hidden="true" />
+                </button>
+              </div>
+            )}
 
           {findRequest > 0 && (
             <ConversationFind
