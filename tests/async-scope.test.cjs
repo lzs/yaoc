@@ -142,9 +142,14 @@ test('save retries stop after profile changes or reconnecting the same profile',
     const methods = [];
     app.api.request = (method) => {
       methods.push(method);
+      if (method === 'agents.workspace.get')
+        return Promise.resolve({ file: { content: 'A', hash: 'a'.repeat(64) } });
       return method === 'agents.files.set' ? save.promise : Promise.resolve({});
     };
-    app.view.setActiveFileName('A.md');
+    // A known Gateway hash lets the save go out at once, before the profile changes.
+    await app.view.loadWorkspaceFile('main', 'A.md');
+    methods.length = 0;
+    app.render();
     app.view.setFileContent('Private A content');
     app.render();
     const pending = app.view.handleSaveWorkspaceFile();
@@ -264,6 +269,64 @@ test('Gateway-provided byte hashes are retained and save conflicts preserve draf
   assert.equal(app.view.fileContent, 'Unsaved draft');
   assert.equal(app.view.savedFileContent, 'Original');
   assert.match(app.view.fileStatusMsg, /File changed on the Gateway/);
+});
+
+test('agent file saves are bound to the read revision and conflicts never fall back', async () => {
+  const app = fixture();
+  const calls = [];
+  app.api.request = async (method, params) => {
+    calls.push([method, params]);
+    if (method === 'agents.workspace.get')
+      return { file: { content: 'Remote', hash: 'd'.repeat(64) } };
+    if (method === 'agents.files.set')
+      throw new Error('agent file "MEMORY.md" changed since it was read');
+    return {};
+  };
+  await app.view.loadWorkspaceFile('main', 'MEMORY.md');
+  app.render();
+  app.view.setFileContent('My draft');
+  app.render();
+  await app.view.handleSaveWorkspaceFile();
+  app.render();
+  const writes = calls.filter(([method]) => method.endsWith('.set'));
+  assert.deepEqual(
+    writes.map(([method, params]) => [method, params.expectedHash, params.expectedMissing]),
+    [['agents.files.set', 'd'.repeat(64), undefined]]
+  );
+  assert.equal(app.view.fileContent, 'My draft');
+  assert.equal(app.view.savedFileContent, 'Remote');
+  assert.match(app.view.fileStatusMsg, /File changed on the Gateway/);
+});
+
+test('a missing agent file is created only if it is still missing', async () => {
+  const app = fixture();
+  const sets = [];
+  app.api.request = async (method, params) => {
+    if (method === 'agents.workspace.get') throw new Error('not found');
+    if (method === 'agents.files.get') return { file: { name: 'DREAMS.md', missing: true } };
+    if (method === 'agents.files.set') {
+      sets.push(params);
+      return { ok: true, file: { hash: 'e'.repeat(64) } };
+    }
+    return {};
+  };
+  await app.view.loadWorkspaceFile('main', 'DREAMS.md');
+  app.render();
+  assert.match(app.view.fileStatusMsg, /does not exist yet; Save creates it/);
+  app.view.setFileContent('# Dreams');
+  app.render();
+  await app.view.handleSaveWorkspaceFile();
+  app.render();
+  app.view.setFileContent('# Dreams\n\nMore');
+  app.render();
+  await app.view.handleSaveWorkspaceFile();
+  assert.deepEqual(
+    sets.map((p) => [p.expectedMissing, p.expectedHash]),
+    [
+      [true, undefined],
+      [undefined, 'e'.repeat(64)],
+    ]
+  );
 });
 
 test('pin writes confirm once and preserve another selected session', async () => {
