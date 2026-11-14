@@ -6,8 +6,8 @@ import {
   Check,
   CornerLeftUp,
   Cpu,
+  Download,
   FileCode2,
-  FilePlus2,
   FileText,
   Folder,
   FolderOpen,
@@ -859,8 +859,6 @@ export default function App() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [savingFile, setSavingFile] = useState(false);
   const [fileStatusMsg, setFileStatusMsg] = useState<string>('');
-  const [showNewFileInput, setShowNewFileInput] = useState(false);
-  const [newFileNameInput, setNewFileNameInput] = useState('');
 
   // Pairing & Onboarding Guide State
   const [autoPollPairing, setAutoPollPairing] = useState(true);
@@ -2429,24 +2427,20 @@ export default function App() {
     }
   }
 
-  function handleCreateNewWorkspaceFile() {
-    const raw = newFileNameInput.trim().replace(/^\/+/, '');
-    if (!raw) return;
-    const relPath = currentDir && !raw.includes('/') ? `${currentDir}/${raw}` : raw;
-    if (
-      fileContent !== savedFileContent &&
-      !window.confirm(`Discard unsaved changes to "${activeFileName}"?`)
-    ) {
-      return;
+  async function handleSaveWorkspaceCopy() {
+    const api = window.openclawApi;
+    if (!api?.saveFileCopy || !activeFileName) return;
+    const name = activeFileName;
+    try {
+      const savedPath = await api.saveFileCopy(name, fileContent);
+      if (savedPath && workspaceFileNameRef.current === name) {
+        setFileStatusMsg(`✓ Saved a copy to ${savedPath}`);
+      }
+    } catch (err: any) {
+      if (workspaceFileNameRef.current === name) {
+        setFileStatusMsg(`Could not save a copy: ${err?.message || 'Unknown error'}`);
+      }
     }
-    ++workspaceFileSeqRef.current;
-    setActiveFileName(relPath);
-    setFileContent(`# ${raw}\n\n`);
-    setSavedFileContent('');
-    setSavedFileHash(undefined);
-    setFileStatusMsg(`New file: ${relPath} (press Save or Ctrl+S to write to Gateway)`);
-    setNewFileNameInput('');
-    setShowNewFileInput(false);
   }
 
   async function connectGateway(profile: GatewayProfile) {
@@ -4628,14 +4622,6 @@ export default function App() {
                 <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                   <button
                     className="btn"
-                    onClick={() => setShowNewFileInput((v) => !v)}
-                    disabled={connStatus.state !== 'connected'}
-                    title="Create New File in Current Folder"
-                  >
-                    <FilePlus2 size={13} />
-                  </button>
-                  <button
-                    className="btn"
                     onClick={() => {
                       loadWorkspaceFilesList(selectedAgentId, currentDir);
                       loadWorkspaceFile(selectedAgentId, activeFileName);
@@ -4644,6 +4630,15 @@ export default function App() {
                     title="Reload Workspace Tree & Active File"
                   >
                     <RefreshCw size={13} />
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => void handleSaveWorkspaceCopy()}
+                    disabled={!window.openclawApi?.saveFileCopy || !activeFileName || loadingFile}
+                    title="Save a Copy to This PC (includes unsaved edits)"
+                    aria-label="Save a copy to this PC"
+                  >
+                    <Download size={13} />
                   </button>
                   <button
                     className="btn btn-primary"
@@ -4656,32 +4651,6 @@ export default function App() {
                 </div>
               </div>
 
-              {showNewFileInput && (
-                <div
-                  style={{
-                    padding: '8px 12px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    background: 'var(--bg-root)',
-                    display: 'flex',
-                    gap: '6px',
-                    alignItems: 'center',
-                  }}
-                >
-                  <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                    {currentDir ? `${currentDir}/` : '/'}
-                  </span>
-                  <input
-                    className="input-field"
-                    placeholder="filename.md (Enter to create)"
-                    value={newFileNameInput}
-                    onChange={(e) => setNewFileNameInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleCreateNewWorkspaceFile()}
-                  />
-                  <button className="btn btn-primary" onClick={handleCreateNewWorkspaceFile}>
-                    Create
-                  </button>
-                </div>
-              )}
 
               {/* Quick-jump bar for core persona files */}
               <div className="file-tabs">
@@ -4863,6 +4832,7 @@ export default function App() {
                   >
                     <span
                       style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={fileStatusMsg || undefined}
                     >
                       {fileStatusMsg ||
                         `${activeFileName} • ${(fileSizeBytes / 1024).toFixed(1)} KB`}
