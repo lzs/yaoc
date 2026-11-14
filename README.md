@@ -2,7 +2,7 @@
 
 **Yet Another OpenClaw Chat** (YAOC, pronounced "yoke") is an independent Windows desktop client for OpenClaw Gateways. It connects directly over WebSocket, with no bundled browser.
 
-YAOC is designed to be deliberately minimal and efficient: a small, self-contained client built to have almost no impact on system resources. It typically uses under 6 MB of RAM, and the executable is under 6 MB. For comparison, that is a fraction of what most desktop chat clients consume, because there is no browser engine inside. It is also optimised for battery life, with no background polling loops.
+YAOC is designed to be deliberately minimal and efficient: a small, self-contained client built to have almost no impact on system resources. It typically uses under 6 MB of RAM (excluding system's WebView2), and the executable is under 6 MB. It is also optimised for battery life, with no background polling loops.
 
 It requires Windows 11 (x64 or ARM64), and is intended as a replacement for the official OpenClaw Windows Companion, focusing on chat and access to workspace files. YAOC is not an official OpenClaw application.
 
