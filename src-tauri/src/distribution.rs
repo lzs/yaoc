@@ -151,8 +151,9 @@ fn package_family_name() -> Result<Option<String>, String> {
     Ok(None)
 }
 pub fn initialize() -> Result<(), String> {
+    // dunce drops the \\?\ verbatim prefix std adds on Windows when the plain form is equivalent.
     let executable = std::env::current_exe()
-        .and_then(|p| p.canonicalize())
+        .and_then(dunce::canonicalize)
         .map_err(|e| e.to_string())?;
     let local = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
