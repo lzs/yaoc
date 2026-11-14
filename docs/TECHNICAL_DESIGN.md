@@ -287,9 +287,12 @@ OpenClaw Gateways expose two tiers of file APIs depending on server version and 
 2. **Reading a File (`loadWorkspaceFile`):**
    - First calls `agents.workspace.get` `{ agentId, path: cleanRelPath }`, which can read any file in the workspace root or subdirectories.
    - If that fails, falls back to `agents.files.get` `{ agentId, name: cleanRelPath }` (which has a strict schema accepting only `agentId` + root `name`).
-3. **Saving / Creating a File (`handleSaveWorkspaceFile`):**
+3. **Saving a File (`handleSaveWorkspaceFile`):**
+   - OpenClaw Gateways only let clients edit existing workspace files: `sessions.files.set` updates a file that already exists (up to 256 KB) and answers `session_file_not_found` otherwise, and `agents.files.set` covers only the agent's bootstrap files (`AGENTS.md`, `SOUL.md`, …). YAOC therefore offers no New File or upload action; the quick tabs can still open and save a missing bootstrap file.
    - If the file is in the workspace root (`!cleanRelPath.includes('/')`), first attempts `agents.files.set` `{ agentId, name: cleanRelPath, content }`.
    - If the file is in a subdirectory (or `agents.files.set` rejects non-standard root filenames), falls back to `sessions.files.set` `{ sessionKey, path: "${workspaceRootPath}/${cleanRelPath}", content, expectedHash }`. The required `expectedHash` is the Gateway-reported hash captured when loading the file, or SHA-256 of the last-read UTF-8 contents when the read API omits a hash. Successful saves replace the saved baseline and retain the returned hash for the next save. Conflict errors keep the draft and instruct the user to copy it before reloading; they never retry with a newer hash or overwrite the remote edit.
+4. **Saving a Copy to This PC (`handleSaveWorkspaceCopy`):**
+   - The Download button sends the editor's current text (including unsaved edits) to the `save_file_copy` command (`src-tauri/src/save_copy.rs`). It shows the native Save As dialog (`GetSaveFileNameW`, owned by the main window, on a worker thread in a single-threaded COM apartment) with the file's base name, then writes the text as UTF-8. Cancelling returns `null`; nothing is written.
 
 #### Tool Execution Approvals
 
@@ -299,8 +302,7 @@ OpenClaw Gateways expose two tiers of file APIs depending on server version and 
 
 1. **HTML5 Drag-and-Drop (`dragDropEnabled: false`):**
    - In `src-tauri/tauri.conf.json`, `"dragDropEnabled": false` is **intentionally set** on the window configuration.
-   - Tauri v2's native file-drop handler intercepts OS drag events by default and blocks standard DOM `onDragOver` / `onDrop` `e.dataTransfer.files` access in WebView2. Setting `"dragDropEnabled": false` allows `App.tsx` to read dropped `File` objects directly in WebView2 via `FileReader` (`readAsDataURL`).
-2. **Per-App-Run Session Scroll Memory & Smart Auto-Scroll:**
+   - Tauri v2's native file-drop handler intercepts OS drag events by default and blocks standard DOM `onDragOver` / `onDrop` `e.dataTransfer.files` access in WebView2. Setting `"dragDropEnabled": false` allows `App.tsx` to read dropped `File` objects directly in WebView2 via `FileReader` (`readAsDataURL`).2. **Per-App-Run Session Scroll Memory & Smart Auto-Scroll:**
    - `visitedSessionsRef` and `sessionScrollTopRef` track which sessions have been viewed during the current app run and their last `scrollTop` offset.
    - When `loadChatHistory` resolves and calls `setMessages(mapped)`, it queues `pendingScrollActionRef` so `useLayoutEffect([messages])` runs at the exact render when the new session's messages mount:
      - **First visit to a session in the current app run:** Jumps immediately to the bottom (`el.scrollTop = el.scrollHeight`) and holds a 600 ms bottom lock (`initialBottomLockUntilRef`) so inline `<img className="message-image-thumb">` attachments that finish decoding right after mount keep the viewport pinned at the bottom.

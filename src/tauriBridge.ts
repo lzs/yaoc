@@ -147,6 +147,9 @@ export function initTauriBridge(): void {
     openExternalUrl: (url: string) =>
       invokeWithError<{ ok: boolean }>('open_external_url', { url }),
 
+    saveFileCopy: (fileName: string, content: string) =>
+      invokeWithError<string | null>('save_file_copy', { fileName, content }),
+
     setTaskbarProgress: (status?: string, progress?: number) =>
       invokeWithError<void>('set_taskbar_progress', {
         status: status ?? 'none',

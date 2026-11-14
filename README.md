@@ -14,7 +14,7 @@ It requires Windows 11 (x64 or ARM64), and is intended as a replacement for the 
 - Streaming chat, reasoning traces, tool activity, and execution approvals.
 - Image and file attachments through paste, drag-and-drop, or the attachment button.
 - Agent/session switching, Gateway-synced session pins, model selection, Gateway-advertised reasoning choices, and session actions.
-- Gateway workspace browsing and editing, where the Gateway exposes those methods.
+- Gateway workspace browsing and editing of existing files, where the Gateway exposes those methods. The download button saves a copy of the open file to this PC.
 - Dark/light/system themes, resizable panels, a system tray icon, and a configurable global shortcut (default **Alt+Shift+3**).
 - Automatic Windows background efficiency mode while unfocused, minimized, or hidden in the tray.
 - An offline demo for trying the interface without a Gateway.

@@ -5,6 +5,7 @@ mod efficiency;
 mod instance;
 #[cfg(windows)]
 mod native_notifications;
+mod save_copy;
 mod storage;
 mod updater;
 mod window_chrome;
@@ -2197,6 +2198,7 @@ fn main() {
             set_global_hotkey,
             quit_app,
             open_external_url,
+            save_copy::save_file_copy,
             set_taskbar_progress,
             show_notification,
             play_notification_sound,
