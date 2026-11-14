@@ -4670,7 +4670,6 @@ export default function App() {
                 </div>
               </div>
 
-
               {/* Quick-jump bar for core persona files */}
               <div className="file-tabs">
                 <button
