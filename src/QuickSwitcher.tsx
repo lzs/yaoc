@@ -175,7 +175,7 @@ export default function QuickSwitcher({
         id: 'cmd-workspace-toggle',
         type: 'command',
         title: showWorkspacePane ? 'Hide Workspace Drawer' : 'Show Workspace Drawer',
-        subtitle: 'Toggle files and configuration editor',
+        subtitle: 'Toggle files and configuration editor (Ctrl+Shift+E)',
         icon: <Folder size={16} />,
         onSelect: () => {
           onClose();

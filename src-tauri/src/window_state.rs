@@ -6,6 +6,10 @@ use std::sync::{
 };
 use tauri::{Manager, PhysicalPosition, PhysicalSize, Window};
 
+/// Minimum client size in logical pixels; must match `minWidth`/`minHeight` in tauri.conf.json.
+const MIN_WIDTH: f64 = 800.0;
+const MIN_HEIGHT: f64 = 620.0;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Placement {
     x: i32,
@@ -22,6 +26,38 @@ struct Placement {
 pub struct WindowState {
     ready: AtomicBool,
     placement: Mutex<Option<Placement>>,
+    /// The workspace drawer's share of the window width while it is open, so
+    /// closing the drawer gives that width back. Logical pixels.
+    expansion: Mutex<Option<Expansion>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Expansion {
+    /// Width the drawer currently adds to the window. Starts as the amount the
+    /// window grew; follows later drawer resizes (divider or window edge).
+    added: f64,
+    /// Part of the drawer that did not fit when it opened and narrowed the chat.
+    squeezed: f64,
+    /// How far the window moved left to make room.
+    shifted: f64,
+}
+
+impl Expansion {
+    fn follow(&mut self, drawer_width: f64) {
+        self.added = (drawer_width - self.squeezed).max(0.0);
+    }
+}
+
+/// What the page is telling the window about the workspace drawer.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DrawerChange {
+    /// The drawer just opened at this width: widen the window for it.
+    Open,
+    /// The open drawer changed width: only remember it, never resize.
+    Resize,
+    /// The drawer closed: give back the width it currently adds.
+    Close,
 }
 
 #[derive(Clone, Copy)]
@@ -63,10 +99,10 @@ impl Placement {
         // configured minimum size and the available desktop work area.
         self.width = ((f64::from(self.width) * ratio).round() as u32)
             .min(area.width.saturating_sub(self.frame_width))
-            .max((960.0 * area.scale).round() as u32);
+            .max((MIN_WIDTH * area.scale).round() as u32);
         self.height = ((f64::from(self.height) * ratio).round() as u32)
             .min(area.height.saturating_sub(self.frame_height))
-            .max((620.0 * area.scale).round() as u32);
+            .max((MIN_HEIGHT * area.scale).round() as u32);
         let right = i64::from(area.x) + i64::from(area.width)
             - i64::from(self.width)
             - i64::from(self.frame_width);
@@ -194,8 +230,24 @@ pub fn save(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         track(&window.as_ref().window());
     }
-    let placement = app.state::<WindowState>().placement.lock().unwrap().clone();
-    if let Some(placement) = placement {
+    let state = app.state::<WindowState>();
+    let placement = state.placement.lock().unwrap().clone();
+    let expansion = *state.expansion.lock().unwrap();
+    if let Some(mut placement) = placement {
+        // Remember the size without the workspace widening; the page widens the
+        // window again on the next launch if the workspace is still open.
+        if let Some(expansion) = expansion {
+            let added = (expansion.added * placement.scale).round() as u32;
+            let shifted = (expansion.shifted * placement.scale).round() as i32;
+            let min_width = (MIN_WIDTH * placement.scale).round() as u32;
+            let width = placement.width.saturating_sub(added).max(min_width);
+            if width < placement.width {
+                placement.x = placement
+                    .x
+                    .saturating_add(shifted.min((placement.width - width) as i32));
+                placement.width = width;
+            }
+        }
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
             let dir = super::get_storage_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -211,9 +263,212 @@ pub fn save(app: &tauri::AppHandle) {
     }
 }
 
+/// Plans widening a window whose outer edges are `left`..`right` within a work
+/// area `area_left`..`area_right` (all physical pixels). Grows to the right first,
+/// then moves left for whatever does not fit. Returns (grow, shift_left).
+fn plan_expansion(
+    left: i64,
+    right: i64,
+    area_left: i64,
+    area_right: i64,
+    desired: i64,
+) -> (i64, i64) {
+    let room_right = (area_right - right).max(0);
+    let room_left = (left - area_left).max(0);
+    let grow = desired.min(room_right + room_left).max(0);
+    (grow, (grow - room_right).max(0))
+}
+
+/// True while Windows Snap has arranged the window (half, quarter or layout).
+fn is_arranged(window: &Window) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use std::ffi::c_void;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetModuleHandleW(name: *const u16) -> *mut c_void;
+            fn GetProcAddress(module: *mut c_void, name: *const std::ffi::c_char) -> *const c_void;
+        }
+        let Ok(hwnd) = window.hwnd() else {
+            return false;
+        };
+        let name: Vec<u16> = "user32.dll\0".encode_utf16().collect();
+        unsafe {
+            let user32 = GetModuleHandleW(name.as_ptr());
+            if user32.is_null() {
+                return false;
+            }
+            // IsWindowArranged is only present on newer Windows 10/11 builds.
+            let proc = GetProcAddress(user32, c"IsWindowArranged".as_ptr());
+            if proc.is_null() {
+                return false;
+            }
+            let is_window_arranged: extern "system" fn(*mut c_void) -> i32 =
+                std::mem::transmute(proc);
+            is_window_arranged(hwnd.0) != 0
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        false
+    }
+}
+
+fn can_resize_for_workspace(window: &Window) -> bool {
+    !window.is_minimized().unwrap_or(true)
+        && !is_maximized(window).unwrap_or(true)
+        && !window.is_fullscreen().unwrap_or(true)
+        && !is_arranged(window)
+}
+
+/// Keeps the window in step with the workspace drawer (`width` is its logical
+/// width including the drag handle). Opening widens the window so the chat keeps
+/// its width; closing gives back whatever the drawer then adds. Returns how many
+/// logical pixels the window grew (open) or shrank (close). Maximized,
+/// full-screen, snapped and minimized windows are never resized.
+pub fn set_workspace_expansion(
+    window: &Window,
+    change: DrawerChange,
+    width: f64,
+) -> tauri::Result<f64> {
+    let state = window.state::<WindowState>();
+    let mut current = state.expansion.lock().unwrap();
+    let width = if width.is_finite() {
+        width.max(0.0)
+    } else {
+        0.0
+    };
+    match change {
+        DrawerChange::Resize => {
+            if let Some(expansion) = current.as_mut() {
+                expansion.follow(width);
+            }
+            Ok(0.0)
+        }
+        DrawerChange::Open => {
+            if let Some(expansion) = current.as_mut() {
+                expansion.follow(width);
+                return Ok(0.0);
+            }
+            if width <= 0.0 || !can_resize_for_workspace(window) {
+                return Ok(0.0);
+            }
+            let Some(monitor) = window.current_monitor()? else {
+                return Ok(0.0);
+            };
+            let scale = window.scale_factor()?;
+            let position = window.outer_position()?;
+            let outer = window.outer_size()?;
+            let inner = window.inner_size()?;
+            let work = monitor.work_area();
+            let left = i64::from(position.x);
+            let (grow, shift) = plan_expansion(
+                left,
+                left + i64::from(outer.width),
+                i64::from(work.position.x),
+                i64::from(work.position.x) + i64::from(work.size.width),
+                (width * scale).round() as i64,
+            );
+            if grow <= 0 {
+                return Ok(0.0);
+            }
+            let grew = grow as f64 / scale;
+            *current = Some(Expansion {
+                added: grew,
+                squeezed: (width - grew).max(0.0),
+                shifted: shift as f64 / scale,
+            });
+            if shift > 0 {
+                window.set_position(PhysicalPosition::new((left - shift) as i32, position.y))?;
+            }
+            window.set_size(PhysicalSize::new(inner.width + grow as u32, inner.height))?;
+            Ok(grew)
+        }
+        DrawerChange::Close => {
+            let Some(expansion) = current.take() else {
+                return Ok(0.0);
+            };
+            if !can_resize_for_workspace(window) {
+                return Ok(0.0);
+            }
+            let scale = window.scale_factor()?;
+            let inner = window.inner_size()?;
+            let position = window.outer_position()?;
+            let min_width = (MIN_WIDTH * scale).round() as u32;
+            let added = (expansion.added * scale).round() as u32;
+            let new_width = inner
+                .width
+                .saturating_sub(added)
+                .max(min_width)
+                .min(inner.width);
+            let shrunk = i64::from(inner.width - new_width);
+            let shift = ((expansion.shifted * scale).round() as i64).min(shrunk);
+            window.set_size(PhysicalSize::new(new_width, inner.height))?;
+            if shift > 0 {
+                window.set_position(PhysicalPosition::new(
+                    (i64::from(position.x) + shift) as i32,
+                    position.y,
+                ))?;
+            }
+            Ok(shrunk as f64 / scale)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn set_workspace_window_expansion(
+    window: tauri::WebviewWindow,
+    change: DrawerChange,
+    width: f64,
+) -> Result<f64, String> {
+    set_workspace_expansion(&window.as_ref().window(), change, width).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minimum_size_matches_the_tauri_config() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = &config["app"]["windows"][0];
+        assert_eq!(window["minWidth"].as_f64(), Some(MIN_WIDTH));
+        assert_eq!(window["minHeight"].as_f64(), Some(MIN_HEIGHT));
+    }
+
+    #[test]
+    fn drawer_resizes_change_what_closing_gives_back() {
+        // Opened at 805 but only 600 fitted: the chat absorbed 205.
+        let mut expansion = Expansion {
+            added: 600.0,
+            squeezed: 205.0,
+            shifted: 0.0,
+        };
+        // Window edge dragged out by 200: the drawer took it all.
+        expansion.follow(1005.0);
+        assert_eq!(expansion.added, 800.0);
+        // Divider dragged so the drawer is narrower than the squeezed part.
+        expansion.follow(150.0);
+        assert_eq!(expansion.added, 0.0);
+        let change: DrawerChange = serde_json::from_str("\"resize\"").unwrap();
+        assert_eq!(change, DrawerChange::Resize);
+    }
+
+    #[test]
+    fn expansion_grows_right_then_moves_left_within_the_work_area() {
+        // Plenty of room on the right.
+        assert_eq!(plan_expansion(100, 1100, 0, 2560, 560), (560, 0));
+        // Only 200 px on the right: move left by the rest.
+        assert_eq!(plan_expansion(1000, 2360, 0, 2560, 560), (560, 360));
+        // Not enough room anywhere: take what fits.
+        assert_eq!(plan_expansion(50, 1850, 0, 1920, 560), (120, 50));
+        // Already overflowing the right edge and flush left: nothing to give.
+        assert_eq!(plan_expansion(0, 2000, 0, 1920, 560), (0, 0));
+        // Secondary monitor to the left of the primary (negative coordinates).
+        assert_eq!(plan_expansion(-1800, -400, -1920, 0, 560), (520, 120));
+    }
     fn placement() -> Placement {
         Placement {
             x: 200,

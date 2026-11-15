@@ -149,6 +149,8 @@ export function initTauriBridge(): void {
 
     saveFileCopy: (fileName: string, content: string) =>
       invokeWithError<string | null>('save_file_copy', { fileName, content }),
+    setWorkspaceWindowExpansion: (change: 'open' | 'resize' | 'close', width: number) =>
+      invokeWithError<number>('set_workspace_window_expansion', { change, width }),
     exportTranscript: (fileName: string, markdown: string, html: string) =>
       invokeWithError<string | null>('export_transcript', { fileName, markdown, html }),
 

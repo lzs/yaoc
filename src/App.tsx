@@ -538,6 +538,14 @@ async function hashWorkspaceText(content: string): Promise<string> {
 }
 
 // Gateway refusals for a write whose file changed (or appeared) since it was read.
+/** Workspace drawer width when none has been saved. */
+const DEFAULT_WORKSPACE_WIDTH = 800;
+
+/** Width of each drag handle beside the sidebar and the workspace drawer (`.pane-resizer`). */
+const PANE_RESIZER_WIDTH = 5;
+const MIN_WORKSPACE_WIDTH = 300;
+const MAX_WORKSPACE_WIDTH = 1000;
+
 const WORKSPACE_CONFLICT_PATTERN =
   /changed since it was read|session_file_conflict|agent_file_conflict|hash.*(?:mismatch|conflict)/i;
 
@@ -814,6 +822,12 @@ export default function App() {
     const saved = loadLocalUiState();
     return typeof saved.notificationSound === 'boolean' ? saved.notificationSound : true;
   });
+  const [widenWindowForWorkspace, setWidenWindowForWorkspace] = useState<boolean>(() => {
+    const saved = loadLocalUiState();
+    return typeof saved.widenWindowForWorkspace === 'boolean'
+      ? saved.widenWindowForWorkspace
+      : true;
+  });
   const notificationsEnabledRef = useRef(notificationsEnabled);
   notificationsEnabledRef.current = notificationsEnabled;
   const notificationSoundRef = useRef(notificationSound);
@@ -847,7 +861,7 @@ export default function App() {
     const saved = loadLocalUiState();
     return typeof saved.workspaceWidth === 'number' && saved.workspaceWidth >= 300
       ? saved.workspaceWidth
-      : 560;
+      : DEFAULT_WORKSPACE_WIDTH;
   });
   const [workspaceTreeWidth, setWorkspaceTreeWidth] = useState<number>(() => {
     const saved = loadLocalUiState().workspaceTreeWidth;
@@ -1024,6 +1038,92 @@ export default function App() {
   const chatHistorySeqRef = useRef(0);
   const workspaceFileSeqRef = useRef(0);
 
+  // The chat keeps its width while the workspace drawer is open: opening the
+  // drawer widens the window for it, closing gives that width back, and resizing
+  // the window resizes the drawer (within its limits) rather than the chat. The
+  // Rust side never resizes maximized, full-screen or snapped windows.
+  const workspaceWidthRef = useRef(workspaceWidth);
+  workspaceWidthRef.current = workspaceWidth;
+  const sidebarWidthRef = useRef(sidebarWidth);
+  sidebarWidthRef.current = sidebarWidth;
+  // Chat width to hold during window resizes; null while the drawer is closed or settling.
+  const pinnedChatWidthRef = useRef<number | null>(null);
+  const drawerChangeRef = useRef(0);
+  const followingWindowResizeRef = useRef(false);
+  const chatWidthNow = () =>
+    window.innerWidth -
+    sidebarWidthRef.current -
+    workspaceWidthRef.current -
+    2 * PANE_RESIZER_WIDTH;
+
+  useLayoutEffect(() => {
+    const api = window.openclawApi;
+    const change = ++drawerChangeRef.current;
+    pinnedChatWidthRef.current = null;
+    const drawerWidth = workspaceWidthRef.current + PANE_RESIZER_WIDTH;
+    const startWidth = window.innerWidth;
+    // Hold the chat width only once the page sees the window's new size.
+    const settle = (windowDelta: number) => {
+      const target = startWidth + windowDelta;
+      const deadline = performance.now() + 1000;
+      const check = () => {
+        if (change !== drawerChangeRef.current) return;
+        if (Math.abs(window.innerWidth - target) <= 1 || performance.now() > deadline) {
+          pinnedChatWidthRef.current = chatWidthNow();
+        } else {
+          requestAnimationFrame(check);
+        }
+      };
+      requestAnimationFrame(check);
+    };
+    if (!showWorkspacePane) {
+      api?.setWorkspaceWindowExpansion?.('close', 0).catch(() => {});
+      return;
+    }
+    if (!api?.setWorkspaceWindowExpansion) {
+      settle(0);
+      return;
+    }
+    const opening = widenWindowForWorkspace;
+    api
+      .setWorkspaceWindowExpansion(opening ? 'open' : 'close', drawerWidth)
+      .then((amount) => settle(opening ? amount : -amount))
+      .catch(() => settle(0));
+  }, [showWorkspacePane, widenWindowForWorkspace]);
+
+  // Drawer width changes: from a window resize the chat keeps its width; from
+  // the divider (or loaded settings) the chat width changes, so hold the new one.
+  useEffect(() => {
+    if (followingWindowResizeRef.current) {
+      followingWindowResizeRef.current = false;
+    } else if (pinnedChatWidthRef.current !== null) {
+      pinnedChatWidthRef.current = chatWidthNow();
+    }
+    if (showWorkspacePane && widenWindowForWorkspace && pinnedChatWidthRef.current !== null) {
+      window.openclawApi
+        ?.setWorkspaceWindowExpansion?.('resize', workspaceWidth + PANE_RESIZER_WIDTH)
+        .catch(() => {});
+    }
+  }, [workspaceWidth, sidebarWidth]);
+
+  useEffect(() => {
+    if (!showWorkspacePane) return;
+    const followWindow = () => {
+      const pinned = pinnedChatWidthRef.current;
+      if (pinned === null) return;
+      const available = window.innerWidth - sidebarWidthRef.current - 2 * PANE_RESIZER_WIDTH;
+      const next = Math.round(
+        Math.max(MIN_WORKSPACE_WIDTH, Math.min(MAX_WORKSPACE_WIDTH, available - pinned))
+      );
+      if (next !== workspaceWidthRef.current) {
+        followingWindowResizeRef.current = true;
+        setWorkspaceWidth(next);
+      }
+    };
+    window.addEventListener('resize', followWindow);
+    return () => window.removeEventListener('resize', followWindow);
+  }, [showWorkspacePane]);
+
   const uiStateRef = useRef<UiSessionState>({
     autoConnect,
     selectedAgentId,
@@ -1038,6 +1138,7 @@ export default function App() {
     globalHotkey,
     notificationsEnabled,
     notificationSound,
+    widenWindowForWorkspace,
   });
 
   useEffect(() => {
@@ -1055,6 +1156,7 @@ export default function App() {
       globalHotkey,
       notificationsEnabled,
       notificationSound,
+      widenWindowForWorkspace,
     };
     uiStateRef.current = nextUiState;
     try {
@@ -1091,6 +1193,7 @@ export default function App() {
     globalHotkey,
     notificationsEnabled,
     notificationSound,
+    widenWindowForWorkspace,
   ]);
 
   // Taskbar Progress & State Ring (Feature 1)
@@ -1332,7 +1435,7 @@ export default function App() {
               ? fileUi.workspaceWidth
               : typeof localUi.workspaceWidth === 'number'
                 ? localUi.workspaceWidth
-                : 560,
+                : DEFAULT_WORKSPACE_WIDTH,
           globalHotkey:
             typeof fileUi.globalHotkey === 'string'
               ? fileUi.globalHotkey
@@ -1350,6 +1453,12 @@ export default function App() {
               ? fileUi.notificationSound
               : typeof localUi.notificationSound === 'boolean'
                 ? localUi.notificationSound
+                : true,
+          widenWindowForWorkspace:
+            typeof fileUi.widenWindowForWorkspace === 'boolean'
+              ? fileUi.widenWindowForWorkspace
+              : typeof localUi.widenWindowForWorkspace === 'boolean'
+                ? localUi.widenWindowForWorkspace
                 : true,
         };
 
@@ -1372,6 +1481,9 @@ export default function App() {
         }
         if (typeof mergedUi.notificationSound === 'boolean') {
           setNotificationSound(mergedUi.notificationSound);
+        }
+        if (typeof mergedUi.widenWindowForWorkspace === 'boolean') {
+          setWidenWindowForWorkspace(mergedUi.widenWindowForWorkspace);
         }
         setAutoConnect(Boolean(mergedUi.autoConnect));
         if (mergedUi.selectedAgentId) {
@@ -2937,6 +3049,27 @@ export default function App() {
         openConversationFind();
         return;
       }
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.code === 'KeyE' || e.key.toLowerCase() === 'e')
+      ) {
+        if (
+          e.defaultPrevented ||
+          e.isComposing ||
+          e.repeat ||
+          isRecordingHotkey ||
+          showProfileModal ||
+          showQuitConfirmModal ||
+          lightboxImage ||
+          document.querySelector('[role="dialog"], [aria-modal="true"]')
+        )
+          return;
+        e.preventDefault();
+        setShowWorkspacePane((v) => !v);
+        return;
+      }
       // Quick Switcher (Ctrl+P for search) & Command Palette (Ctrl+Shift+P for commands) — no Ctrl+K
       if (
         (e.ctrlKey || e.metaKey) &&
@@ -3021,7 +3154,10 @@ export default function App() {
         const nextWidth = Math.max(180, Math.min(560, e.clientX));
         setSidebarWidth(nextWidth);
       } else if (resizingPane === 'workspace') {
-        const nextWidth = Math.max(300, Math.min(1000, window.innerWidth - e.clientX));
+        const nextWidth = Math.max(
+          MIN_WORKSPACE_WIDTH,
+          Math.min(MAX_WORKSPACE_WIDTH, window.innerWidth - e.clientX)
+        );
         setWorkspaceWidth(nextWidth);
       } else if (resizingPane === 'workspace-tree' && workspaceSplitRef.current) {
         const bounds = workspaceSplitRef.current.getBoundingClientRect();
@@ -3493,7 +3629,8 @@ export default function App() {
           <button
             className={`btn ${showWorkspacePane ? 'btn-primary' : ''}`}
             onClick={() => setShowWorkspacePane((v) => !v)}
-            title="Toggle Agent Workspace Files Editor"
+            title="Show or hide the agent workspace (Ctrl+Shift+E)"
+            aria-keyshortcuts="Control+Shift+E"
           >
             <FolderOpen size={14} /> Workspace Files
           </button>
@@ -5240,6 +5377,34 @@ export default function App() {
                     <p className="settings-help">
                       Notifies when agent generations complete or when tool execution approvals are
                       requested while YAOC is unfocused or minimized to tray.
+                    </p>
+                  </div>
+
+                  <div className="form-row">
+                    <label>Workspace</label>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'pointer',
+                        fontSize: '12.5px',
+                        color: 'var(--text-normal)',
+                        marginTop: '2px',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={widenWindowForWorkspace}
+                        onChange={(e) => setWidenWindowForWorkspace(e.target.checked)}
+                      />
+                      <span>Widen the window when the workspace opens</span>
+                    </label>
+                    <p className="settings-help">
+                      Keeps the chat the same width by growing the window to the right (or moving it
+                      left near the screen edge), and shrinks it back when the workspace closes.
+                      Maximized, full-screen and snapped windows keep their size. Toggle the
+                      workspace with <code>Ctrl+Shift+E</code>.
                     </p>
                   </div>
 

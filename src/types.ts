@@ -163,6 +163,7 @@ export interface UiSessionState {
   globalHotkey?: string;
   notificationsEnabled?: boolean;
   notificationSound?: boolean;
+  widenWindowForWorkspace?: boolean;
   promptTemplates?: PromptTemplate[];
 }
 
@@ -207,6 +208,11 @@ declare global {
       openExternalUrl?: (url: string) => Promise<{ ok: boolean }>;
       /** Shows a Save As dialog; resolves to the saved path, or null if cancelled. */
       saveFileCopy?: (fileName: string, content: string) => Promise<string | null>;
+      /** Keeps the window in step with the workspace drawer; resolves to the logical px grown (open) or shrunk (close). */
+      setWorkspaceWindowExpansion?: (
+        change: 'open' | 'resize' | 'close',
+        width: number
+      ) => Promise<number>;
       exportTranscript?: (
         fileName: string,
         markdown: string,

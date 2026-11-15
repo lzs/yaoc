@@ -90,7 +90,12 @@ async function openApp(browser, options = {}) {
     const windowCallbacks = new Set();
 
     window.testExports = [];
+    window.testExpansions = [];
     window.openclawApi = {
+      setWorkspaceWindowExpansion: async (change, width) => {
+        window.testExpansions.push({ change, width });
+        return 0;
+      },
       exportTranscript: async (fileName, markdown, html) => {
         if (options.exportError) throw new Error('Disk is full');
         window.testExports.push({ fileName, markdown, html });
@@ -340,6 +345,8 @@ async function openApp(browser, options = {}) {
     await require('./reset-confirmation-browser.cjs')(browser, openApp);
     if (process.env.YAOC_TEST_RESET_ONLY === '1') return;
     await require('./transcript-export-browser.cjs')(browser, openApp);
+    await require('./workspace-window-browser.cjs')(browser, openApp);
+    if (process.env.YAOC_TEST_WORKSPACE_ONLY === '1') return;
     if (process.env.YAOC_TEST_EXPORT_ONLY === '1') return;
     {
       const updates = await openApp(browser, {
@@ -388,7 +395,9 @@ async function openApp(browser, options = {}) {
         },
       });
       await page.locator('.message-body').waitFor();
-      await page.getByTitle('Toggle Agent Workspace Files Editor', { exact: true }).click();
+      await page
+        .getByTitle('Show or hide the agent workspace (Ctrl+Shift+E)', { exact: true })
+        .click();
       const editor = page.locator('.editor-textarea');
       await page
         .locator('.workspace-tree-list')
@@ -490,7 +499,7 @@ async function openApp(browser, options = {}) {
       await page.getByRole('dialog', { name: 'Settings' }).waitFor();
       assert.equal(await page.evaluate(() => window.testWindowActions.length), count);
       await page.keyboard.press('Escape');
-      for (const width of [1360, 960]) {
+      for (const width of [1360, 800]) {
         await page.setViewportSize({ width, height: 860 });
         assert.equal(await header.evaluate((el) => el.scrollWidth > el.clientWidth), false);
         const select = await header
@@ -841,6 +850,7 @@ async function openApp(browser, options = {}) {
       const shortcuts = page.getByRole('tabpanel', { name: 'Shortcuts', exact: true });
       await shortcuts.getByText('Ctrl+P', { exact: true }).waitFor();
       await shortcuts.getByText('Ctrl+Shift+P', { exact: true }).waitFor();
+      await shortcuts.getByText('Ctrl+Shift+E', { exact: true }).waitFor();
       await shortcuts.getByText('Alt+Shift+3', { exact: true }).waitFor();
       await page.keyboard.press('Escape');
       const draftInput = page.getByRole('textbox', { name: 'Message Assistant', exact: true });
@@ -978,7 +988,7 @@ async function openApp(browser, options = {}) {
       const effort = page.getByRole('button', { name: 'Reasoning effort', exact: true });
       for (const viewport of [
         { width: 1360, height: 860 },
-        { width: 960, height: 620 },
+        { width: 800, height: 620 },
       ]) {
         await page.setViewportSize(viewport);
         for (const trigger of [model, effort]) {

@@ -61,6 +61,7 @@ const groups = [
   {
     title: 'Workspace and windows',
     shortcuts: [
+      ['Show or hide the workspace', 'Ctrl+Shift+E', 'Open or close the agent workspace drawer.'],
       [
         'Save the workspace file',
         'Ctrl+S',

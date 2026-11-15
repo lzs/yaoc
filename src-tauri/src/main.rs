@@ -2200,6 +2200,7 @@ fn main() {
             open_external_url,
             save_copy::save_file_copy,
             save_copy::export_transcript,
+            window_state::set_workspace_window_expansion,
             set_taskbar_progress,
             show_notification,
             play_notification_sound,
